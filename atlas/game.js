@@ -2832,10 +2832,28 @@
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (picker && picker.kind === 'editName') { if (picker.isNew) closePicker(true); else openPicker('pick'); } }
     });
   }
+  function pickerNoteTex(str, hudPx, maxW, sc) {
+    const px = hudPx * sc, m = document.createElement('canvas').getContext('2d');
+    const lines = wrapWords(m, str, maxW * sc, `800 ${px}px ${FONT}`);
+    m.font = `800 ${px}px ${FONT}`;
+    const lineW = lines.map(ln => m.measureText(ln).width);
+    const tw_ = Math.max(1, ...lineW), padx = px * 0.85, pady = px * 0.48, lh = px * 1.24;
+    const b = B.bake(tw_ + padx * 2, pady * 2 + lines.length * lh);
+    const sd = sid(str), mg = Math.max(2, Math.round(2 * sc), Math.ceil(px * 0.08));
+    B.paper(b, cutEdge(mg, mg, b.w - mg, b.h - mg, px * 0.14, sd), HUD_PAPER, 0.12);
+    lines.forEach((ln, li) => {
+      const cy = pady + (li + 0.5) * lh;
+      for (const [q, st] of [[b.c, '#40424c'], [b.g, B.grey(0.72)]]) {
+        q.save(); q.font = `800 ${px}px ${FONT}`; q.textAlign = 'center'; q.textBaseline = 'middle';
+        q.fillStyle = st; q.fillText(ln, b.w * 0.5, cy); q.restore();
+      }
+    });
+    const t = B.tex(b, { noMip: true }); t.lw = b.w / sc; t.lh = b.h / sc; return t;
+  }
   function rebuildPicker() {
     if (!picker) return;
     clearPickerSprites(false);
-    picker.items = []; picker.extraSprites = []; picker.nameSprite = null; picker.head = null;
+    picker.items = []; picker.extraSprites = []; picker.nameSprite = null; picker.head = null; picker.note = null;
     const sc = devPerHud();
     const mkPTex = (str, px, o = {}) => textTex(str, px, Object.assign({ scale: sc, noMip: true, cut: true }, o));
     const headTxt = picker.kind === 'confirmRemove' ? 'Remove this player?' : picker.kind === 'askLevel' ? 'How do you want to play?' : picker.kind === 'askName' ? 'Add a name?' : picker.kind === 'editName' ? 'Your name' : 'Who is playing?';
@@ -2845,6 +2863,16 @@
     // batch 4: the picker's cards and tags lie on a paper mat, not straight on the map (opaque kraft, wobbly cut edge)
     { const mt = shapeTex(Math.round(900 * sc), Math.round(640 * sc), b => B.paper(b, wob(6 * sc, 6 * sc, b.w - 6 * sc, b.h - 6 * sc, 9 * sc, 4471), '#cdb995', 0.3), { noMip: true });
       picker.mat = pSpr(mt, { order: 217, own: true, z: 0.13, zr: 0.02, w: 900, h: 640 }); }
+    if (picker.kind === 'pick' || picker.kind === 'tokens') {
+      const narrow = asp < 0.9, W = 1000 * asp;
+      const noteMaxW = narrow ? Math.min(440, W - 96) : Math.min(720, W - 120);
+      const noteStr = "Your players and progress are saved only in this browser on this device. If you clear the browser's data or use another device, you start again.";
+      const nt = pickerNoteTex(noteStr, narrow ? 20 : 21, noteMaxW, sc);
+      const note = pSpr(nt, { order: 219, own: true, w: nt.lw, h: nt.lh });
+      note.bw = nt.lw; note.bh = nt.lh; note.tilt = 0.35 * DEG;
+      picker.note = note;
+      picker.extraSprites.push({ s: note, role: 'note' });
+    }
     if (picker.kind === 'tokens') {
       const taken = new Set(store.players.map(p => p.token));
       const avail = TOKENS.filter(t => !taken.has(t));
@@ -2967,9 +2995,16 @@
       const gx = narrow ? 16 : 28, gy = narrow ? 16 : 24;
       const cw = narrow ? Math.min(240, (W - 36 - gx) / 2) : 240;
       const baseCh = picker.kind === 'pick' ? 192 : 174;
-      const ch = Math.max(156, narrow ? Math.min(baseCh, (975 - gridTop - gy * Math.max(0, rows - 1)) / Math.max(1, rows)) : baseCh);
+      const note = picker.note, noteGap = narrow ? 16 : 20;
+      let noteH = 0;
+      if (note) {
+        const ns = Math.min(1, (W - 60) / note.bw);
+        note.w = note.bw * ns; note.h = note.bh * ns;
+        noteH = note.h + noteGap;
+      }
+      const ch = Math.max(136, narrow ? Math.min(baseCh, (965 - noteH - gridTop - gy * Math.max(0, rows - 1)) / Math.max(1, rows)) : baseCh);
       const totalW = cols * cw + (cols - 1) * gx, x0 = (W - totalW) / 2 + cw / 2;
-      const availH = 980 - gridTop, totalH = rows * ch + (rows - 1) * gy;
+      const availH = 965 - noteH - gridTop, totalH = rows * ch + (rows - 1) * gy;
       const y0 = gridTop + Math.max(0, (availH - totalH) * 0.25) + ch / 2;
       picker.items.forEach((it, idx) => {
         const col = idx % cols, row = Math.floor(idx / cols);
@@ -2996,6 +3031,12 @@
           it.lbl.hx = cx; it.lbl.hy = cy;
         }
       });
+      if (note) {
+        const gridBot = y0 + Math.max(0, rows - 1) * (ch + gy) + ch / 2;
+        note.x = W / 2;
+        note.y = gridBot + noteGap + note.h / 2;
+        note.rot = note.tilt || 0;
+      }
     } else if (picker.kind === 'editName') {
       let y = gridTop;
       const prev = picker.extraSprites[0];
@@ -3091,6 +3132,7 @@
       }
       return;
     }
+    if (picker.note && hit(picker.note, p.hx, p.hy, 4)) return;
     if (currentPlayer()) {
       if (picker.kind === 'editName') confirmNameEdit();
       closePicker(true);
@@ -5935,7 +5977,7 @@
           capRatio: +(n.capRatio || 0).toFixed(3)
         };
       }),
-      picker: picker ? { kind: picker.kind, count: picker.items.length, hold: hold ? +(T - hold.t0).toFixed(2) : 0, extraCount: picker.extraSprites.length, head: picker.head && { x: picker.head.x, y: picker.head.y, w: picker.head.w, h: picker.head.h }, items: picker.items.map(it => ({ kind: it.kind, token: it.token || (it.player && it.player.token), id: it.player && it.player.id, name: it.player && it.player.name, level: it.player && cleanLevel(it.player.level), x: it.card.x, y: it.card.y, w: it.card.w, h: it.card.h, nameY: it.nameS && it.nameS.y, nameH: it.nameS && it.nameS.h, levelY: it.levelS && it.levelS.y, levelH: it.levelS && it.levelS.h })) } : null,
+      picker: picker ? { kind: picker.kind, count: picker.items.length, hold: hold ? +(T - hold.t0).toFixed(2) : 0, extraCount: picker.extraSprites.length, head: picker.head && { x: picker.head.x, y: picker.head.y, w: picker.head.w, h: picker.head.h }, note: picker.note && { x: picker.note.x, y: picker.note.y, w: picker.note.w, h: picker.note.h }, items: picker.items.map(it => ({ kind: it.kind, token: it.token || (it.player && it.player.token), id: it.player && it.player.id, name: it.player && it.player.name, level: it.player && cleanLevel(it.player.level), x: it.card.x, y: it.card.y, w: it.card.w, h: it.card.h, nameY: it.nameS && it.nameS.y, nameH: it.nameS && it.nameS.h, levelY: it.levelS && it.levelS.y, levelH: it.levelS && it.levelS.h })) } : null,
       round: RD && { cont: RD.ct.id, r: RD.r, fi: RD.fi, wind: !!RD.wind, list: RD.list.map(c => c.id), spawning: RD.spawning && RD.spawning.id, hintStep: RD.hintStep, miss: RD.miss, memory: !!RD.memory, memShowing: !!RD.memShowing, modelBackAlpha: RD.back ? RD.back.alpha : 0, baseCam: RD.baseCam, zoomedIn: isZoomedIn(), card: RD.card && { x: RD.card.x, y: RD.card.y, w: RD.card.w, h: RD.card.h }, cardFlag: RD.cardLanded && RD.cardLanded._onCard && RD.cardLanded.flag ? (() => { const s = RD.cardLanded, c = s.c, shA = (c.A || (c.bw * c.bh * 0.5)) * s.sc * s.sc, flA = s.flag.w * s.flag.h; return { id: c.id, w: +s.flag.w.toFixed(3), h: +s.flag.h.toFixed(3), x: +s.flag.x.toFixed(3), y: +s.flag.y.toFixed(3), poleBaseY: +(s.pole.y + s.pole.h * 0.5).toFixed(3), cardTopY: +(RD.card.y - RD.card.h * 0.5).toFixed(3), areaPct: +(flA / Math.max(1e-6, shA) * 100).toFixed(2) }; })() : null, spot: RD.spot && { x: RD.spot.x, y: RD.spot.y }, leader: !!RD.leader, cardName: !!RD.cardName, cardLanded: !!RD.cardLanded, col: RD.col.map((s, i) => ({ id: RD.list[i] && RD.list[i].id, x: s.x, y: s.y, w: s.w, h: s.h })), piece: RD.piece && { id: RD.piece.c.id, isCard: !!RD.piece.c.isCard, waiting: !!RD.piece.waiting, flag: RD.piece.flag ? { x: RD.piece.flag.x, y: RD.piece.flag.y, w: RD.piece.flag.w * (RD.piece.flag.sc || 1), h: RD.piece.flag.h * (RD.piece.flag.sc || 1) } : null, tile: !!RD.piece.tile, tileBox: RD.piece.tile ? { x: RD.piece.tile.x, y: RD.piece.tile.y, w: RD.piece.tile.w * RD.piece.tile.sc, h: RD.piece.tile.h * RD.piece.tile.sc, rot: RD.piece.tile.rot } : null, x: RD.piece.x, y: RD.piece.y, w: RD.piece.w, h: RD.piece.h, sc: RD.piece.sc, rot: RD.piece.rot, tp: RD.piece.tp, bbox: RD.piece.c.bbox }, parts: RD.parts.map(s => ({ ok: s.ok, placed: s.placed, x: s.x, y: s.y, tx: s.tx, ty: s.ty, w: s.w * s.sc, h: s.h * s.sc, idx: s.idx })), model: RD.model && S.includes(RD.model) ? { x: RD.model.x, y: RD.model.y, w: RD.model.w, h: RD.model.h } : null, mat: RD.FH ? { x: RD.mx, y: RD.my, FH: RD.FH, fit: RD.tableFit || null } : null },
       worldTag: tag && S.includes(tag) ? { x: tag.x, y: tag.y, w: tag.w, h: tag.h, alpha: tag.alpha, dist: tag._dist, ptrLen: tagPtr ? tagPtr._len : 0, ptr: tagPtr ? { x: tagPtr.x, y: tagPtr.y, w: tagPtr.w, h: tagPtr.h, rot: tagPtr.rot } : null } : null,
       pile: (() => { const bx = q => ({ id: q.c && q.c.id, x: q.x, y: q.y, w: q.w * q.sc, h: q.h * q.sc, rot: q.rot }); return RD && RD.windPile ? Object.values(RD.windPile).filter(q => S.includes(q)).map(bx) : wind ? wind.items.filter(it => S.includes(it.s)).map(it => bx(it.s)) : []; })(),

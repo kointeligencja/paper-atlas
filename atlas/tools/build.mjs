@@ -233,7 +233,7 @@ function pageAnalyse(svgText, PAL, OV) {
     const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml').documentElement;
     let vw = parseFloat(doc.getAttribute('width')), vh = parseFloat(doc.getAttribute('height')); const vb = (doc.getAttribute('viewBox') || '').split(/[ ,]+/).map(Number);
     if (vb.length === 4) { vw = vb[2]; vh = vb[3]; }
-    const asp = vw / vh; const H = 300, W = Math.round(H * asp), SS = 3, N = W * H, KS = 1200; // KS: sticker bake, px per flag height (old build: 600)
+    const asp = vw / vh; const H = 300, W = Math.round(H * asp), SS = 3, N = W * H, KS = 720; // KS: sticker bake, px per flag height (matches game.js max PK = 720)
     if (!doc.getAttribute('width')) { doc.setAttribute('width', vw); doc.setAttribute('height', vh); }
     const img = new Image(); await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(doc)); });
     const cv = document.createElement('canvas'); cv.width = W * SS; cv.height = H * SS; const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(img, 0, 0, W * SS, H * SS);
@@ -443,7 +443,7 @@ function pageAnalyse(svgText, PAL, OV) {
         const fc = field.get(u); if (u !== 15 && cls[i] === u && fc && Math.abs(rd.data[i * 4] - fc.r) + Math.abs(rd.data[i * 4 + 1] - fc.g) + Math.abs(rd.data[i * 4 + 2] - fc.b) < 40) { id.data[o] = PR[u][0]; id.data[o + 1] = PR[u][1]; id.data[o + 2] = PR[u][2]; } else { id.data[o] = rd.data[i * 4]; id.data[o + 1] = rd.data[i * 4 + 1]; id.data[o + 2] = rd.data[i * 4 + 2]; }
         id.data[o + 3] = Math.round(al[i] * rd.data[i * 4 + 3] / 255); if (al[i] > 24) stkCover[(y0 + (((y + by0) / K) | 0)) * W + x0 + (((x + bx0) / K) | 0)] = 1; }
       og.putImageData(id, 0, 0);
-      parts.push({ k: 'sticker', x: +((x0 + bx0 / K) / H).toFixed(4), y: +((y0 + by0 / K) / H).toFixed(4), w: +(ow / K / H).toFixed(4), h: +(oh / K / H).toFixed(4), img: oc.toDataURL('image/png') });
+      parts.push({ k: 'sticker', x: +((x0 + bx0 / K) / H).toFixed(4), y: +((y0 + by0 / K) / H).toFixed(4), w: +(ow / K / H).toFixed(4), h: +(oh / K / H).toFixed(4), img: oc.toDataURL('image/webp', 0.85) });
     }
     // ---------- verify: redraw the paper parts, compare with the reference outside the sticker ----------
     const vc = document.createElement('canvas'); vc.width = W; vc.height = H; const vg = vc.getContext('2d', { willReadFrequently: true });

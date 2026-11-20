@@ -21,6 +21,19 @@ and open `http://<your-computer's-address>:8751` on the tablet.
 Handy URL options: `?view=mail` opens Air Mail, `?view=mail&letter=J1` starts one letter,
 `?reset` clears all players and progress.
 
+## Saving and privacy
+
+- **Progress and players:** Saved only in your browser (`localStorage`) on that device. There
+  are no accounts, no server sync, and we do not collect any data.
+- **When progress is lost:** Clearing the browser's site data or playing in a private window
+  will lose your saved players and progress. Opening the game with `?reset` clears them on purpose.
+- **Voice:** Spoken words use your browser's built-in speech synthesis. Depending on the browser
+  and chosen voice (for example, Chrome with Google voices), the browser itself may send text to
+  an online speech service from the browser maker.
+- **Fonts:** The display font (`Baloo 2`) loads from Google Fonts.
+- **Hosting:** The public site runs on Vercel, which keeps standard web server logs. The game adds
+  no analytics, cookies or trackers.
+
 ## Status
 
 Early version, played at home. The history texts on the Air Mail story cards are drafts and
