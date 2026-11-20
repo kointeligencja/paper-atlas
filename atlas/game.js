@@ -71,6 +71,8 @@
   const PHONE = Q.has('phone') ? Q.get('phone') !== '0' && Q.get('phone') !== 'false' : (window.matchMedia ? matchMedia('(pointer: coarse)').matches : false) && Math.min(screen.width, screen.height) < 500;
   const isPhonePortrait = () => PHONE && innerHeight > innerWidth;
   const edgeHud = px => px * 1000 / Math.max(1, innerHeight);
+  const uiK = () => PHONE ? clamp(700 / Math.max(1, innerHeight), 1, 1.92) : 1;
+  const tokHud = () => 74 * Math.min(uiK(), 1.8);
   const viewMetrics = () => { const r = B.cv.getBoundingClientRect(); return { iw: innerWidth, ih: innerHeight, cw: Math.round(r.width), ch: Math.round(r.height) }; };
   const vpStr = () => { const v = viewMetrics(); return `window ${v.iw}x${v.ih} canvas ${v.cw}x${v.ch}`; };
   const initDpr = Math.min(2, window.devicePixelRatio || 1), initPx = Math.round(innerWidth * initDpr) * Math.round(innerHeight * initDpr);
@@ -575,12 +577,12 @@
   const tokTex = {};
   TOKENS.forEach(tok => { tokTex[tok] = shapeTex(240, 240, b => drawToken(b, tok, 120, 120, 2.15)); });
   const playerBtnTex = (tok, sc = devPerHud()) => {
-    const px = Math.max(96, Math.round(74 * sc)), k = px / 124;
+    const L = tokHud(), px = Math.max(96, Math.round(L * sc)), k = px / 124;
     const t = shapeTex(px, px, b => {
       B.paper(b, cutEdge(5 * k, 5 * k, px - 5 * k, px - 5 * k, 7 * k, sid(tok)), CREAM, 0.25);
       drawToken(b, tok, px * 0.5, px * 0.5, 0.96 * k);
     }, { noMip: true });
-    t.lw = 74; t.lh = 74; return t;
+    t.lw = L; t.lh = L; return t;
   };
   // ---------- static scene ----------
   const flat = shapeTex(8, 8, b => B.paper(b, x => x.rect(-2, -2, 12, 12), '#fff', 0.5));
@@ -716,15 +718,17 @@
   const BTN_INK = { undo: CREAM, zoomIn: CREAM, zoomOut: CREAM };
   let hintS = null, hintTxt = '', lastHudDevH = B.size()[1];
   const titleTex = sc => textTex('The paper atlas', 58 * 0.9, { strip: HUD_PAPER, col: INK, cut: true, scale: sc, noMip: true });
-  const hintTex = (t, sc) => textTex(t, 38 * 0.86, { strip: CREAM, col: INK, cut: true, seed: 5, scale: sc, noMip: true });
+  const hintTex = (t, sc) => textTex(t, 38 * 0.86 * Math.min(uiK(), 1.35), { strip: CREAM, col: INK, cut: true, seed: 5, scale: sc, noMip: true });
   const mkTitle = () => { const t = titleTex(devPerHud()); const s = spr(t, { hud: true, z: 0.1, zr: 0.03, order: 200 }); s.bw = s.w = t.lw; s.bh = s.h = t.lh; s.tilt = HUD_TILT.title * DEG; return s; };
   const title = mkTitle();
   const pBtnTex = {};
   const bakePBtn = () => { const sc = devPerHud(); TOKENS.forEach(tok => { if (pBtnTex[tok]) B.freeTex(pBtnTex[tok]); pBtnTex[tok] = playerBtnTex(tok, sc); }); };
   bakePBtn();
   const playerBtn = spr(pBtnTex.boat, { hud: true, z: 0.1, zr: 0.03, order: 200, alpha: 0 });
-  playerBtn.bw = playerBtn.w = 74; playerBtn.bh = playerBtn.h = 74; playerBtn.tilt = HUD_TILT.token * DEG;
+  playerBtn.bw = playerBtn.w = tokHud(); playerBtn.bh = playerBtn.h = tokHud(); playerBtn.tilt = HUD_TILT.token * DEG;
   function updateHudToken() {
+    const L = tokHud();
+    playerBtn.bw = playerBtn.w = L; playerBtn.bh = playerBtn.h = L;
     const p = currentPlayer();
     if (!p) { playerBtn.alpha = 0; return; }
     playerBtn.tex = pBtnTex[p.token] || pBtnTex.boat;
@@ -742,7 +746,7 @@
   function setHint(t) { if (Q.has('vp')) t = vpStr(); if (t === hintTxt) return; hintTxt = t; if (hintS) { hintS.own = true; kill(hintS); } const tx = hintTex(t, devPerHud()); hintS = spr(tx, { hud: true, z: 0.1, zr: 0.03, order: 200 }); hintS.bw = hintS.w = tx.lw; hintS.bh = hintS.h = tx.lh; hintS.tilt = HUD_TILT.hint * DEG; hintS.rot = hintS.tilt; hintS.lift = 0.12; tw(hintS, { lift: 0 }, 0.25, { cut: true }); }
   const btn = {}, btnMeta = {};
   const isZoomBtn = id => id === 'zoomIn' || id === 'zoomOut';
-  const zoomBtnHud = () => Math.max(64, 46 * 1000 / Math.max(1, innerHeight)); // the + and - buttons: at least 44 px on screen
+  const zoomBtnHud = () => Math.max(64, (PHONE ? 48 : 46) * 1000 / Math.max(1, innerHeight)); // the + and - buttons: at least 44 px on screen
   const zoomBtnTex = (id, colr, sc) => {
     const L = zoomBtnHud(), W = Math.round(L * sc), k = W / L;
     const t = shapeTex(W, W, b => {
@@ -755,7 +759,7 @@
   };
   const mkBtn = (id, label, colr) => {
     btnMeta[id] = { label, colr }; const old = btn[id], sc = devPerHud();
-    const tx = isZoomBtn(id) ? zoomBtnTex(id, colr, sc) : textTex(label, 34 * 0.9, { strip: colr || CREAM, col: BTN_INK[id] || INK, cut: true, seed: 11, scale: sc, noMip: true });
+    const tx = isZoomBtn(id) ? zoomBtnTex(id, colr, sc) : textTex(label, 34 * 0.9 * uiK(), { strip: colr || CREAM, col: BTN_INK[id] || INK, cut: true, seed: 11, scale: sc, noMip: true });
     const s = spr(tx, { hud: true, rail: isZoomBtn(id), z: 0.1, zr: 0.03, order: 200 }); s.bw = s.w = tx.lw; s.bh = s.h = tx.lh;
     s.tilt = (HUD_TILT[id === 'hint' ? 'hintBtn' : id] || 0) * DEG; s.rot = s.tilt;
     if (old) { s.wob = old.wob; s.x = old.x; s.y = old.y; s.alpha = old.alpha; old.own = true; kill(old); }
@@ -784,6 +788,7 @@
     title.rot = title.tilt; playerBtn.rot = playerBtn.tilt + wobbleRot(playerBtn); if (hintS) hintS.rot = hintS.tilt;
     for (const id of BTN_IDS) if (!isZoomBtn(id)) btn[id].rot = btn[id].tilt + wobbleRot(btn[id]);
     if (asp < 0.9) {
+      title.alpha = 1;
       layoutZoomBtns();
       const pad = 24, maxW = Math.max(120, W - pad * 2), tGap = 10;
       const totW = title.bw + (hasP ? tGap + playerBtn.bw : 0);
@@ -810,10 +815,54 @@
       if (typeof layoutPicker === 'function' && picker) { layoutPicker(); fitPickerMat(); }
       return;
     }
+    if (PHONE && mode !== 'world' && !picker) {
+      title.alpha = 0;
+      const padX = 24, gap = 14, zGapOut = 18;
+      playerBtn.w = playerBtn.bw; playerBtn.h = playerBtn.bh;
+      const ids = ['sound', 'passport', 'mail', 'world', 'hint', 'undo']; // air mail
+      const vis = ids.filter(btnOn);
+      const hasZ = btnOn('zoomIn');
+      const zW = hasZ ? zoomBtnHud() * 2 + ZGAP + zGapOut : 0;
+      const leftEdge = hasP ? padX + playerBtn.w + gap : padX;
+      const availBtnW = Math.max(120, W - padX - leftEdge - zW);
+      const rawW = vis.reduce((a, id) => a + btn[id].bw, 0) + gap * Math.max(0, vis.length - 1);
+      const bs = Math.min(1, availBtnW / Math.max(1, rawW));
+      const btnH = btn.sound.bh * bs;
+      const rowH = Math.max(hasZ ? zoomBtnHud() : 0, btnH, hasP ? playerBtn.h : 0);
+      const cy = 8 + rowH / 2;
+      playerBtn.x = padX + playerBtn.w / 2; playerBtn.y = cy;
+      let x = W - padX;
+      for (const id of ids) {
+        const s = btn[id], on = btnOn(id);
+        s.w = s.bw * bs; s.h = s.bh * bs; s.alpha = on ? 1 : 0;
+        if (on) { s.x = x - s.w / 2; s.y = cy + (s._hopY || 0); x -= s.w + gap * bs; }
+      }
+      const zRight = x - zGapOut + gap * bs;
+      layoutZoomBtns(zRight, cy);
+      const rightEdge = (hasZ ? zRight - zoomBtnHud() * 2 - ZGAP : x + gap * bs) - gap;
+      if (hintS) {
+        const availHint = rightEdge - leftEdge;
+        if (availHint >= hintS.bw * 0.75) {
+          const hs = Math.min(1, availHint / Math.max(1, hintS.bw));
+          hintS.w = hintS.bw * hs; hintS.h = hintS.bh * hs;
+          hintS.x = leftEdge + hintS.w / 2; hintS.y = cy;
+        } else {
+          const hasRail = !!(RD && (mode === 'map' || (RD.col && RD.col.length)));
+          const hx0 = hasRail ? 186 : padX;
+          const hs = Math.min(1, Math.max(120, W - padX - hx0) / Math.max(1, hintS.bw));
+          hintS.w = hintS.bw * hs; hintS.h = hintS.bh * hs;
+          hintS.x = hx0 + hintS.w / 2;
+          hintS.y = 8 + rowH + 8 + hintS.h / 2;
+        }
+      }
+      if (typeof layoutPicker === 'function' && picker) { layoutPicker(); fitPickerMat(); }
+      return;
+    }
+    title.alpha = 1;
     title.w = title.bw; title.h = title.bh; title.x = 34 + title.w / 2; title.y = 26 + title.h / 2;
     playerBtn.w = playerBtn.bw; playerBtn.h = playerBtn.bh;
-    playerBtn.x = title.x + title.w / 2 + 14 + playerBtn.w / 2; playerBtn.y = title.y;
-    if (hintS) { hintS.w = hintS.bw; hintS.h = hintS.bh; hintS.x = 34 + hintS.w / 2; hintS.y = title.y + title.h / 2 + 8 + hintS.h / 2; }
+    playerBtn.x = title.x + title.w / 2 + 14 + playerBtn.w / 2; playerBtn.y = PHONE ? Math.max(title.y, 12 + playerBtn.h / 2) : title.y;
+    if (hintS) { hintS.w = hintS.bw; hintS.h = hintS.bh; hintS.x = 34 + hintS.w / 2; hintS.y = (PHONE && hasP ? Math.max(title.y + title.h / 2, playerBtn.y + playerBtn.h / 2) : title.y + title.h / 2) + 8 + hintS.h / 2; }
     const ids = ['sound', 'passport', 'mail', 'world', 'hint', 'undo']; // air mail
     const vis = ids.filter(btnOn);
     const leftLim = (hasP ? playerBtn.x + playerBtn.w / 2 : title.x + title.w / 2) + 20;
@@ -981,7 +1030,19 @@
     if (hintS && hintTxt) { B.freeTex(hintS.tex); const ht = hintTex(hintTxt, sc); hintS.tex = ht; hintS.bw = hintS.w = ht.lw; hintS.bh = hintS.h = ht.lh; }
     for (const id in btnMeta) mkBtn(id, btnMeta[id].label, btnMeta[id].colr);
     bakePBtn(); updateHudToken();
-    if (RD && RD.colLabels) for (const it of RD.colLabels) if (S.includes(it.s)) { B.freeTex(it.s.tex); const nt = mkRailLabel(it.name); it.s.tex = nt; it.s.w = nt.lw; it.s.h = nt.lh; if (it.cy !== undefined && it.hh !== undefined) it.s.y = it.cy + it.hh * 0.52 + Math.max(14, nt.lh / 2 + 2); }
+    if (RD && RD.col) {
+      const y0 = asp < 0.9 ? 290 : 236, step = asp < 0.9 ? 112 : 120;
+      for (let i = 0; i < RD.col.length; i++) { const q = RD.col[i]; if (q && S.includes(q)) q.y = y0 + i * step; }
+    }
+    if (RD && RD.colLabels) {
+      const y0 = asp < 0.9 ? 290 : 236, step = asp < 0.9 ? 112 : 120;
+      for (let i = 0; i < RD.colLabels.length; i++) {
+        const it = RD.colLabels[i]; if (!it || !S.includes(it.s)) continue;
+        it.cy = y0 + i * step;
+        B.freeTex(it.s.tex); const nt = mkRailLabel(it.name); it.s.tex = nt; it.s.w = nt.lw; it.s.h = nt.lh;
+        if (it.hh !== undefined) it.s.y = it.cy + it.hh * 0.52 + Math.max(14, nt.lh / 2 + 2);
+      }
+    }
     if (tag) placeTag();
     if (RD && RD.back) { B.freeTex(RD.back.tex); RD.back.tex = peekTex(); }
     if (picker) rebuildPicker();
@@ -1637,7 +1698,7 @@
     return {
       l: clamp(railR / (1000 * asp), 0.03, 0.18),
       r: 0.025,
-      t: clamp((hb + 8) / 1000, 0.175, 0.21),
+      t: clamp((hb + 8) / 1000, PHONE ? 0.12 : 0.175, 0.21),
       b: 0.025
     };
   };
@@ -1830,11 +1891,11 @@
   // batch 4: the flag table uses its space. The mat is as large as fits (up to 60% of the screen height) and every loose part lies at
   // the mat's scale in tidy rows to the right of and below the mat, with the model flag first; nothing under the HUD or the rail.
   // Straight-cut offcuts in the round's flag papers, in three sizes, fill some of the free table.
-  const tableRect = camH => { layoutHud(); const K = { x: T0.x, y: T0.y, h: camH }, W = 1000 * asp, hb = Math.max(topHudBottom(), title.y + title.h / 2 + 8 + 38 * 0.86 * 1.65 + 4) + 18; // room for the hint line even before it is set
+  const tableRect = camH => { layoutHud(); const K = { x: T0.x, y: T0.y, h: camH }, W = 1000 * asp, hb = (title.alpha > 0.1 ? Math.max(topHudBottom(), title.y + title.h / 2 + 8 + 38 * 0.86 * 1.65 + 4) : topHudBottom()) + 18; // room for the hint line even before it is set
     const a = h2wAt(K, 190, hb), b = h2wAt(K, W - 24, 1000 - Math.max(22, edgeHud(36))); return [a[0], a[1], b[0], b[1]]; };
   const tableFHmax = (f, camH) => { const u = tableRect(camH); return Math.max(40, Math.min(0.6 * camH / (380 / 300), (u[2] - u[0]) * 0.62 / ((f.a * 300 + 80) / 300), (u[3] - u[1]) / (380 / 300))); };
   const matTex = (f, c, k) => shapeTex((f.a * 300 + 80) * k, 380 * k, b => { B.paper(b, wob(6 * k, 6 * k, b.w - 6 * k, b.h - 6 * k, 10 * k, sid(c.id)), '#c9d3bd', 0.5); const x = b.c; x.strokeStyle = 'rgba(60,64,80,0.5)'; x.lineWidth = 1.4 * k; x.setLineDash([10 * k, 4 * k, 3 * k, 4 * k]); x.strokeRect(40 * k, 40 * k, f.a * 300 * k, 300 * k); x.setLineDash([]); x.strokeStyle = 'rgba(60,64,80,0.16)'; x.beginPath(); x.moveTo(40 * k, 190 * k); x.lineTo(b.w - 40 * k, 190 * k); x.moveTo(b.w / 2, 40 * k); x.lineTo(b.w / 2, 340 * k); x.stroke(); });
-  function tableLayout(c, f, mat, model, back, parts, R, camH) {
+  function tableLayout(c, f, mat, model, back, parts, R, camH, instant) {
     const u = tableRect(camH), uw = u[2] - u[0], uh = u[3] - u[1];
     if (uw < 120 || uh < 120) return false;
     // batch 4 correction A: the mat is at least 46% of the screen height; the loose parts share one scale ps (1 down to 0.62 of the
@@ -1878,7 +1939,7 @@
       if (p.it.model) { s.x = hx; s.y = hy; s.w = L.mh * f.a * 1.04; s.h = L.mh * 1.04; s.rot = 0.04; back.x = hx; back.y = hy; back.w = L.mh * f.a * 1.1; back.h = L.mh * 1.12; back.rot = 0.04; continue; }
       const t = s._t; s.w = t.w * FH; s.h = t.h * FH; s.ts = L.ps; s.hx = hx; s.hy = hy; s.hr = (R() - 0.5) * 0.08;
       if (s.ok) { s.tx = mx + (t.cx - f.a / 2) * FH; s.ty = my + (t.cy - 0.5) * FH; }
-      s.x = s.hx; s.y = s.hy + 120; s.rot = s.hr; s.sc = L.ps; tw(s, { y: s.hy }, 0.5, { delay: 0.5 + parts.indexOf(s) * 0.08 });
+      s.x = s.hx; s.y = instant ? s.hy : s.hy + 120; s.rot = s.hr; s.sc = L.ps; if (!instant) tw(s, { y: s.hy }, 0.5, { delay: 0.5 + parts.indexOf(s) * 0.08 });
     }
     parts.forEach((s, i) => { s.order = 40 + i; s.sig = s.sig.replace(/\|[^|]*\|[^|]*$/, '') + '|' + Math.round(s._t.w * 25) + '|' + Math.round(s._t.h * 25); });
     // offcuts: straight cuts (triangles, slivers, trapezoids) in three sizes, in the papers of this round's flags, on free table only
@@ -1898,13 +1959,39 @@
       const t = shapeTex(pw * ppu, pw * ppu, b => { B.paper(b, q => { pts.forEach(([px, py], i) => i ? q.lineTo((px + pw / 2) * ppu, (py + pw / 2) * ppu) : q.moveTo((px + pw / 2) * ppu, (py + pw / 2) * ppu)); q.closePath(); }, shade(PAP[ci], (Rs() - 0.5) * 0.08), 0.45 + Rs() * 0.3); });
       const sp = spr(t, { x, y, w: pw, h: pw, z: 0.068, zr: 0.025, order: 25, rot: Rs() * 6.283 }); sp.own = true; RD.fl.push(sp); made++;
     }
+    const pxW = innerHeight / Math.max(1, camH), maxOv = 6 / pxW, botOv = 4 / pxW;
+    for (const s of parts) {
+      const longPx = Math.max(s.w, s.h) * s.ts * pxW;
+      if (!(longPx > 0 && longPx < 44)) continue;
+      let fMax = Math.min(2.5, 44 / longPx);
+      const hw0 = s.w * s.ts / 2, hh0 = s.h * s.ts / 2;
+      const boxes = [[mx - L.matW / 2, my - L.matH / 2, mx + L.matW / 2, my + L.matH / 2]];
+      if (model) boxes.push([model.x - model.w / 2, model.y - model.h / 2, model.x + model.w / 2, model.y + model.h / 2]);
+      for (const o of parts) if (o !== s) boxes.push([o.hx - o.w * o.ts / 2, o.hy - o.h * o.ts / 2, o.hx + o.w * o.ts / 2, o.hy + o.h * o.ts / 2]);
+      for (const b of boxes) {
+        const dx = Math.max(0, b[0] - s.hx, s.hx - b[2]);
+        const dy = Math.max(0, b[1] - s.hy, s.hy - b[3]);
+        const fx = hw0 > 1e-6 ? (dx + maxOv) / hw0 : 1e9;
+        const fy = hh0 > 1e-6 ? (dy + maxOv) / hh0 : 1e9;
+        const allow = Math.max(fx, fy);
+        if (allow >= 1 && allow < fMax) fMax = allow;
+      }
+      const allowU = Math.min(
+        hw0 > 1e-6 ? (s.hx - u[0] + maxOv) / hw0 : 1e9,
+        hw0 > 1e-6 ? (u[2] - s.hx + maxOv) / hw0 : 1e9,
+        hh0 > 1e-6 ? (s.hy - u[1] + maxOv) / hh0 : 1e9,
+        hh0 > 1e-6 ? (u[3] - s.hy + botOv) / hh0 : 1e9
+      );
+      if (allowU >= 1 && allowU < fMax) fMax = allowU;
+      if (fMax > 1) { s.ts *= fMax; s.sc = s.ts; }
+    }
     return true;
   }
-  function startFlag() {
+  function startFlag(instant) {
     mode = 'flags'; const c = RD.list[RD.fi], f = FL[c.id], ct = RD.ct;
     timers = timers.filter(t => t.tag !== 'peek');
     const camH = Math.max(T0.h, 470 / asp);
-    const camDur = (Math.hypot(cam.x - T0.x, cam.y - T0.y) + Math.abs(cam.h - camH) < 1) ? 0 : 1.1;
+    const camDur = instant || (Math.hypot(cam.x - T0.x, cam.y - T0.y) + Math.abs(cam.h - camH) < 1) ? 0 : 1.1;
     camTo(T0.x, T0.y, camH, camDur);
     const FH = Math.min(118, 212 / f.a), mx = 1034, my = 1692; RD.FH = FH; RD.mx = mx; RD.my = my; RD.parts = []; RD.hist = []; RD.fl = [];
     const PK = clamp(Math.ceil(0.6 * camH / (380 / 300) * B.size()[1] / camH / 40) * 40, 420, 720); // part bake size (px per flag height) for the table's scale
@@ -1923,8 +2010,8 @@
     if (ct.decoys) { const cs = new Set(f.cols.map(q => q[0])); const cand = G.countries.filter(o => o.id !== c.id).map(o => { const os = new Set(FL[o.id].cols.map(q => q[0])); let n = 0; cs.forEach(k => { if (os.has(k)) n++; }); return { o, j: n / (cs.size + os.size - n) + hs(sid(o.id), sid(c.id)) * 0.05 }; }).sort((a, b) => b.j - a.j).slice(0, 2);
       const sigs = new Set(own.map(s => s.sig)); let nd = 0; for (const { o } of cand) for (const p of FL[o.id].parts) { if (nd >= 3 || p.k === 'bands') continue; const f2 = FL[o.id]; const t = partTex(f2, p, PK); const s = spr(t.tex, { w: t.w * FH, h: t.h * FH, z: 0.14, zr: 0.02, order: 40 }); s._t = t; s.own = true; s.ok = false; s.sig = p.k + '|' + (p.polys ? p.polys.map(q => q.c).join('') : 's') + '|' + Math.round(t.w * 25) + '|' + Math.round(t.h * 25); if (sigs.has(s.sig)) { kill(s); continue; } sigs.add(s.sig); RD.fl.push(s); all.push(s); nd++; } }
     const R = rng(sid(c.id) + 3); const ordr = all.map((s, i) => [R(), s]).sort((a, b) => a[0] - b[0]).map(q => q[1]); const n = ordr.length, sp = Math.min(96, 420 / n);
-    if (!tableLayout(c, f, mat, model, back, ordr, R, camH))
-    ordr.forEach((s, i) => { s.ts = Math.min(0.62, sp * 0.9 / s.w, 62 / s.h); s.hx = 1000 + (i - (n - 1) / 2) * sp; s.hy = 1812 + (i % 2) * 7; s.hr = (R() - 0.5) * 0.3; s.x = s.hx; s.y = s.hy + 120; s.rot = s.hr; s.sc = s.ts; s.order = 40 + i; tw(s, { y: s.hy }, 0.5, { delay: 0.5 + i * 0.08 }); });
+    if (!tableLayout(c, f, mat, model, back, ordr, R, camH, instant))
+    ordr.forEach((s, i) => { s.ts = Math.min(0.62, sp * 0.9 / s.w, 62 / s.h); s.hx = 1000 + (i - (n - 1) / 2) * sp; s.hy = 1812 + (i % 2) * 7; s.hr = (R() - 0.5) * 0.3; s.x = s.hx; s.y = instant ? s.hy : s.hy + 120; s.rot = s.hr; s.sc = s.ts; s.order = 40 + i; if (!instant) tw(s, { y: s.hy }, 0.5, { delay: 0.5 + i * 0.08 }); });
     RD.parts = all; RD.tmp.push(...RD.fl);
     if (attract) {
       setHint('Tap to play');
@@ -1957,10 +2044,13 @@
       b.lift = 0.14; tw(b, { lift: 0 }, 0.2, { cut: true });
     }
   }
-  function placePart(s, slot) { // s takes the slot of an equivalent part
+  function placePart(s, slot, silent) { // s takes the slot of an equivalent part
     if (slot !== s) { const a = [s.tx, s.ty, s.idx]; s.tx = slot.tx; s.ty = slot.ty; s.idx = slot.idx; slot.tx = a[0]; slot.ty = a[1]; slot.idx = a[2]; }
-    s.placed = true; s.order = 41 + s.idx; s.z = 0.14 + s.idx * 0.012; tw(s, { x: s.tx, y: s.ty, rot: 0, sc: 1, lift: 0 }, 0.2, { cut: true }); sfx.snap(); RD.hist.push(s);
-    if (RD.parts.every(p => !p.ok || p.placed)) { timers = timers.filter(t => t.tag !== 'peek'); after(0.32, flagDone, 'rd'); }
+    s.placed = true; s.order = 41 + s.idx; s.z = 0.14 + s.idx * 0.012;
+    if (silent) { killTw(s); s.x = s.tx; s.y = s.ty; s.rot = 0; s.sc = 1; s.lift = 0; }
+    else { tw(s, { x: s.tx, y: s.ty, rot: 0, sc: 1, lift: 0 }, 0.2, { cut: true }); sfx.snap(); }
+    RD.hist.push(s);
+    if (!silent && RD.parts.every(p => !p.ok || p.placed)) { timers = timers.filter(t => t.tag !== 'peek'); after(0.32, flagDone, 'rd'); }
   }
   function flagDone() {
     const c = RD.list[RD.fi], f = FL[c.id]; sfx.thump(); speakCountry(c, false); const own = RD.parts.filter(p => p.ok);
@@ -3071,7 +3161,7 @@
     layoutPicker();
   }
   function topHudBottom() {
-    let yMax = title.y + title.h / 2;
+    let yMax = title.alpha > 0.1 ? title.y + title.h / 2 : 0;
     if (hintS && hintS.alpha > 0.1) yMax = Math.max(yMax, hintS.y + hintS.h / 2);
     for (const id in btn) if (btn[id].alpha > 0.1) yMax = Math.max(yMax, btn[id].y + btn[id].h / 2);
     return yMax;
@@ -3178,13 +3268,20 @@
     const m = picker.mat, pad = 26; m.x = (x0 + x1) / 2; m.y = (y0 + y1) / 2; m.w = x1 - x0 + pad * 2; m.h = y1 - y0 + pad * 2; m.rot = -0.008;
   }
   function handlePickerDown(p, e) {
-    const sb = btn.sound;
-    if (sb && sb.alpha > 0.5 && hit(sb, p.hx, p.hy, 8)) { sb.lift = 0.15; tw(sb, { lift: 0 }, 0.3); press('sound'); return; }
+    const hPx = hudPx(), sb = btn.sound;
+    if (sb && sb.alpha > 0.5 && hitMin(sb, p.hx, p.hy, 8, hPx)) { sb.lift = 0.15; tw(sb, { lift: 0 }, 0.3); press('sound'); return; }
     for (const it of picker.items) {
       if (!hit(it.card, p.hx, p.hy, 6)) continue;
       if (it.kind === 'player') {
-        const inName = !!(it.nameS && hit(it.nameS, p.hx, p.hy, 2));
-        const inLevel = !inName && !!(it.levelS && hit(it.levelS, p.hx, p.hy, 2));
+        let inName = !!(it.nameS && hit(it.nameS, p.hx, p.hy, 2));
+        let inLevel = !inName && !!(it.levelS && hit(it.levelS, p.hx, p.hy, 2));
+        if (!inName && !inLevel && p.hy > it.card.y + 1) {
+          const strips = [];
+          if (it.nameS) strips.push({ k: 'name', s: it.nameS });
+          if (it.levelS) strips.push({ k: 'level', s: it.levelS });
+          const sh = pickHit(strips, p.hx, p.hy, 2, hPx, q => q.s);
+          if (sh) { inName = sh.k === 'name'; inLevel = sh.k === 'level'; }
+        }
         hold = { id: e.pointerId, item: it, player: it.player, t0: T, sx: e.clientX, sy: e.clientY, inName, inLevel };
         return;
       }
@@ -3928,23 +4025,24 @@
   }
   function handlePassportDown(p) {
     if (!passport) return;
+    const hPx = hudPx();
     const inBox = (b, x, y, pad = 6) => !!(b && x >= b.x0 - pad && x <= b.x1 + pad && y >= b.y0 - pad && y <= b.y1 + pad);
-    for (const id of ['sound', 'passport']) {
-      const s = btn[id];
-      if (s && s.alpha > 0.5 && hit(s, p.hx, p.hy, 8)) {
-        s.lift = 0.15; tw(s, { lift: 0 }, 0.3);
-        return press(id);
-      }
+    const topBtns = ['sound', 'passport'].map(id => ({ id, s: btn[id] })).filter(q => q.s && q.s.alpha > 0.5);
+    const bh = pickHit(topBtns, p.hx, p.hy, 8, hPx, q => q.s);
+    if (bh) {
+      bh.s.lift = 0.15; tw(bh.s, { lift: 0 }, 0.3);
+      return press(bh.id);
     }
-    for (const tab of passport.tabs) {
-      if (hit(tab.s, p.hx, p.hy, 6)) {
-        if (tab.kind === 'close') { tab.s.lift = 0.18; closePassport(true); }
-        else openPassportSection(tab.id, 0, true);
-        return;
-      }
+    const th = pickHit(passport.tabs, p.hx, p.hy, 6, hPx, t => t.s);
+    if (th) {
+      if (th.kind === 'close') { th.s.lift = 0.18; closePassport(true); }
+      else openPassportSection(th.id, 0, true);
+      return;
     }
     if (inBox(passport.corners.next, p.hx, p.hy, 4)) { turnPassport(1); return; }
     if (inBox(passport.corners.prev, p.hx, p.hy, 4)) { turnPassport(-1); return; }
+    if (inBoxMin(passport.corners.next, p.hx, p.hy, 4, hPx)) { turnPassport(1); return; }
+    if (inBoxMin(passport.corners.prev, p.hx, p.hy, 4, hPx)) { turnPassport(-1); return; }
     if (passport.section !== 'cover') {
       for (const rec of passport.stickers) {
         if (rec.s && rec.s.alpha > 0.5 && hit(rec.s, p.hx, p.hy, 4)) {
@@ -3970,23 +4068,60 @@
   // ---------- input ----------
   const toW = e => { const hx = e.clientX / innerHeight * 1000, hy = e.clientY / innerHeight * 1000; return { hx, hy, w: h2w(hx, hy) }; };
   const screen2W = (cx, cy) => h2w(cx / innerHeight * 1000, cy / innerHeight * 1000);
+  const hudPx = () => Math.max(1e-4, innerHeight / 1000);
+  const worldPx = () => Math.max(1e-4, innerHeight / Math.max(1, cam.h));
   const hit = (s, x, y, pad) => { const dx = x - s.x, dy = y - s.y, c = Math.cos(-s.rot), si = Math.sin(-s.rot), lx = dx * c - dy * si, ly = dx * si + dy * c; return Math.abs(lx) < s.w * s.sc / 2 + pad && Math.abs(ly) < s.h * s.sc / 2 + pad; };
+  const hitMin = (s, x, y, pad, unitPx, minPx = 48) => {
+    const dx = x - s.x, dy = y - s.y, c = Math.cos(-s.rot), si = Math.sin(-s.rot), lx = dx * c - dy * si, ly = dx * si + dy * c;
+    const sw = s.w * s.sc, sh = s.h * s.sc, u = Math.max(1e-6, unitPx);
+    const px = Math.max(pad, (minPx / u - sw) / 2), py = Math.max(pad, (minPx / u - sh) / 2);
+    return Math.abs(lx) < sw / 2 + px && Math.abs(ly) < sh / 2 + py;
+  };
+  const inBoxMin = (b, x, y, pad, unitPx, minPx = 48) => {
+    if (!b) return false;
+    const w = b.x1 - b.x0, h = b.y1 - b.y0, u = Math.max(1e-6, unitPx);
+    const px = Math.max(pad, (minPx / u - w) / 2), py = Math.max(pad, (minPx / u - h) / 2);
+    return x >= b.x0 - px && x <= b.x1 + px && y >= b.y0 - py && y <= b.y1 + py;
+  };
+  const pickHit = (items, x, y, pad, unitPx, getS = q => q, minPx = 48, minPad = pad) => {
+    for (const it of items) { const s = getS(it); if (s && hit(s, x, y, pad)) return it; }
+    let best = null, bd = 1e18;
+    for (const it of items) {
+      const s = getS(it);
+      if (!s || !hitMin(s, x, y, minPad, unitPx, minPx)) continue;
+      const d = Math.hypot(x - s.x, y - s.y);
+      if (d < bd) { bd = d; best = it; }
+    }
+    return best;
+  };
+  function placeDragged(e) {
+    if (!drag) return;
+    const p = toW(e), s = drag.s;
+    const k = cam.h / Math.max(1, innerHeight);
+    const dragSc = drag.piece ? s.tp.sc : 1;
+    const halfH = (Math.abs(Math.sin(s.rot)) * s.w + Math.abs(Math.cos(s.rot)) * s.h) * s.sc / 2;
+    const want = drag.touch && Math.max(s.w, s.h) * dragSc / k < 110 ? halfH + 22 * k : 0;
+    const room = Math.max(0, innerHeight - 10 - e.clientY) * k, lift = Math.min(want, room);
+    const r = want ? clamp(Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) / 40, 0, 1) : 0;
+    s.x = p.w[0] + drag.ox * (1 - r);
+    s.y = p.w[1] + drag.oy * (1 - r) - lift * r;
+  }
   const pieceTolW = s => {
     const pxPerW = innerHeight / Math.max(1, cam.h);
     const shortW = Math.min(s.w, s.h) * (s.tp ? s.tp.sc : s.sc);
     if (playerLevel() === 'own') {
-      const minPx = s.c && s.c.isCard ? 40 : 24;
+      const minPx = s.c && s.c.isCard ? 40 : 32;
       return Math.max(minPx, 0.35 * shortW * pxPerW) / pxPerW;
     }
     const vs = (RD && RD.vh ? RD.vh : cam.h) / 330;
-    return Math.max(15 * vs, shortW * 0.3);
+    return Math.max(15 * vs, shortW * 0.3, 36 * cam.h / Math.max(1, innerHeight));
   };
   const isPieceSnap = s => {
     if (!s || !s.tp || s.waiting || s.returning) return false;
     const rotOk = Math.abs(Math.sin(s.rot / 2)) < 0.05 || Math.abs(((s.rot % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) < 0.05;
     return Math.hypot(s.x - s.tp.x, s.y - s.tp.y) < pieceTolW(s) && rotOk;
   };
-  const isPartSnap = s => { if (!s.ok) return null; const near = RD.parts.filter(q => q.ok && !q.placed && q.sig === s.sig).sort((a, b) => Math.hypot(a.tx - s.x, a.ty - s.y) - Math.hypot(b.tx - s.x, b.ty - s.y))[0]; return (near && Math.hypot(near.tx - s.x, near.ty - s.y) < RD.FH * 0.42) ? near : null; };
+  const isPartSnap = s => { if (!s.ok) return null; const near = RD.parts.filter(q => q.ok && !q.placed && q.sig === s.sig).sort((a, b) => Math.hypot(a.tx - s.x, a.ty - s.y) - Math.hypot(b.tx - s.x, b.ty - s.y))[0]; const tol = Math.max(RD.FH * 0.42, 40 * cam.h / Math.max(1, innerHeight)); return (near && Math.hypot(near.tx - s.x, near.ty - s.y) < tol) ? near : null; };
   let attractN = 0, firstInput = false;
   function stopAttract() {
     attract = false;
@@ -4102,20 +4237,33 @@
       pinch = { id0: pts[0].id, id1: pts[1].id, dist0: dist, h0: cam.h, wMid: screen2W(midX, midY) };
       return;
     }
-    if (currentPlayer() && playerBtn.alpha > 0.5 && hit(playerBtn, p.hx, p.hy, 8)) { // batch 4b: during a round the token only wobbles
-      if (mode === 'world') { playerBtn.wob = undefined; playerBtn.lift = 0.15; tw(playerBtn, { lift: 0 }, 0.3); openPicker('pick'); } else startWobble(playerBtn);
-      return;
+    const hPx = hudPx(), wPx = worldPx();
+    const topHits = [];
+    if (currentPlayer() && playerBtn.alpha > 0.5) topHits.push({ kind: 'token', s: playerBtn });
+    for (const id of BTN_IDS) { const s = btn[id]; if (s && s.alpha > 0.5) topHits.push({ kind: 'btn', id, s }); }
+    const topHit = pickHit(topHits, p.hx, p.hy, 8, hPx, q => q.s);
+    if (topHit) {
+      if (topHit.kind === 'token') { // batch 4b: during a round the token only wobbles
+        if (mode === 'world') { playerBtn.wob = undefined; playerBtn.lift = 0.15; tw(playerBtn, { lift: 0 }, 0.3); openPicker('pick'); } else startWobble(playerBtn);
+        return;
+      }
+      const id = topHit.id, s = topHit.s;
+      if (isZoomBtn(id)) return press(id);
+      s.lift = 0.15; tw(s, { lift: 0 }, 0.3); return press(id);
     }
-    for (const id of BTN_IDS) { const s = btn[id]; if (s && s.alpha > 0.5 && hit(s, p.hx, p.hy, 8)) { if (isZoomBtn(id)) return press(id); s.lift = 0.15; tw(s, { lift: 0 }, 0.3); return press(id); } }
     if (RD && (mode === 'flags' || mode === 'map')) {
+      const railHits = [];
       for (let i = 0; i < RD.col.length; i++) {
         const fs = RD.col[i], lb = RD.colLabels && RD.colLabels[i] && RD.colLabels[i].s;
-        if ((fs && fs.alpha > 0.5 && hit(fs, p.hx, p.hy, 6)) || (lb && lb.alpha > 0.5 && hit(lb, p.hx, p.hy, 6))) {
-          const rc = (fs && fs._c) || (lb && lb._c) || RD.list[i];
-          if (fs) { fs.lift = 0.14; tw(fs, { lift: 0 }, 0.2, { cut: true }); }
-          if (rc) speakCountry(rc, !!(rc.built && CAP[rc.id]));
-          return;
-        }
+        if (fs && fs.alpha > 0.5) railHits.push({ i, fs, lb, s: fs });
+        if (lb && lb.alpha > 0.5) railHits.push({ i, fs, lb, s: lb });
+      }
+      const rh = pickHit(railHits, p.hx, p.hy, 6, hPx, q => q.s);
+      if (rh) {
+        const rc = (rh.fs && rh.fs._c) || (rh.lb && rh.lb._c) || RD.list[rh.i];
+        if (rh.fs) { rh.fs.lift = 0.14; tw(rh.fs, { lift: 0 }, 0.2, { cut: true }); }
+        if (rc) speakCountry(rc, !!(rc.built && CAP[rc.id]));
+        return;
       }
     }
     if (mode === 'world') {
@@ -4129,25 +4277,36 @@
       worldTap = { id: e.pointerId, sx: e.clientX, sy: e.clientY, wx: p.w[0], wy: p.w[1], t: performance.now(), liftCandidate: onLastTag ? null : liftCandidateAt(p.w[0], p.w[1]) };
       return;
     }
-    if (mode === 'flags' && RD) { if (hit(RD.model, p.w[0], p.w[1], 6) && RD.memory) { peek(true); return; } const c = RD.parts.filter(s => !s.placed).sort((a, b) => b.order - a.order).find(s => hit(s, p.w[0], p.w[1], 9)); if (c) { drag = { id: e.pointerId, s: c, ox: c.x - p.w[0], oy: c.y - p.w[1], sx: e.clientX, sy: e.clientY, t: performance.now(), inSnap: !!isPartSnap(c) }; c.order = 90; tw(c, { lift: drag.inSnap ? 0.12 : 0.3, sc: 1, rot: 0 }, 0.15, { cut: true }); sfx.pick(); } return; }
+    if (mode === 'flags' && RD) {
+      if (RD.memory && hit(RD.model, p.w[0], p.w[1], 6)) { peek(true); return; }
+      const loose = RD.parts.filter(s => !s.placed).sort((a, b) => b.order - a.order);
+      const partPad = e.pointerType === 'touch' ? Math.max(9, 22 / wPx) : 9;
+      const c = pickHit(loose, p.w[0], p.w[1], 9, wPx, q => q, 48, partPad);
+      if (c) { drag = { id: e.pointerId, s: c, ox: c.x - p.w[0], oy: c.y - p.w[1], sx: e.clientX, sy: e.clientY, t: performance.now(), inSnap: !!isPartSnap(c), touch: e.pointerType === 'touch' }; c.order = 90; tw(c, { lift: drag.inSnap ? 0.12 : 0.3, sc: 1, rot: 0 }, 0.15, { cut: true }); sfx.pick(); return; }
+      if (RD.memory && hitMin(RD.model, p.w[0], p.w[1], 6, wPx)) { peek(true); return; }
+      return;
+    }
     if (mode === 'map' && RD) {
       if (RD.piece) {
         const s = RD.piece, anc = anchorOf(s);
-        if (hit(s, p.w[0], p.w[1], 14 * cam.h / 330) || Math.hypot(p.w[0] - anc[0], p.w[1] - anc[1]) < 22 * cam.h / 330) {
+        if (hitMin(s, p.w[0], p.w[1], 14 * cam.h / 330, wPx) || Math.hypot(p.w[0] - anc[0], p.w[1] - anc[1]) < Math.max(22 * cam.h / 330, 24 / wPx)) {
           const wasWait = !!(s.waiting || s.returning), wasReturning = !!s.returning;
           s.returning = null;
-          drag = { id: e.pointerId, s, ox: s.x - p.w[0], oy: s.y - p.w[1], wx: p.w[0], wy: p.w[1], sx: e.clientX, sy: e.clientY, t: performance.now(), piece: true, scaled: !wasWait, wasReturning, inSnap: !wasWait && isPieceSnap(s) };
+          drag = { id: e.pointerId, s, ox: s.x - p.w[0], oy: s.y - p.w[1], wx: p.w[0], wy: p.w[1], sx: e.clientX, sy: e.clientY, t: performance.now(), piece: true, scaled: !wasWait, wasReturning, inSnap: !wasWait && isPieceSnap(s), touch: e.pointerType === 'touch' };
           tw(s, { lift: drag.inSnap ? 0.14 : 0.32 }, 0.15, { cut: true }); sfx.pick();
           return;
         }
       }
+      const visTags = [];
       for (let i = activeTags.length - 1; i >= 0; i--) {
         const n = activeTags[i];
-        if (S.includes(n) && n.alpha > 0.5 && hit(n, p.w[0], p.w[1], 4 * cam.h / 330)) {
-          n.lift = 0.14; tw(n, { lift: 0 }, 0.2, { cut: true });
-          if (n._c) speakCountry(n._c, !!(n._c.built && CAP[n._c.id]));
-          return;
-        }
+        if (S.includes(n) && n.alpha > 0.5) visTags.push(n);
+      }
+      const hitTag = pickHit(visTags, p.w[0], p.w[1], 4 * cam.h / 330, wPx);
+      if (hitTag) {
+        hitTag.lift = 0.14; tw(hitTag, { lift: 0 }, 0.2, { cut: true });
+        if (hitTag._c) speakCountry(hitTag._c, !!(hitTag._c.built && CAP[hitTag._c.id]));
+        return;
       }
       mapTap = { id: e.pointerId, sx: e.clientX, sy: e.clientY, t: performance.now() };
       if (playerLevel() === 'own') {
@@ -4244,7 +4403,7 @@
     }
     if (drag.piece && !drag.scaled) return;
     if (drag.piece) s.sc = s.tp.sc;
-    s.x = p.w[0] + drag.ox; s.y = p.w[1] + drag.oy;
+    placeDragged(e);
     if (drag.piece) { const snap = isPieceSnap(s); if (snap !== drag.inSnap) { drag.inSnap = snap; killTw(s, ['lift']); s.lift = snap ? 0.14 : 0.32; } }
     else { const snap = !!isPartSnap(s); if (snap !== drag.inSnap) { drag.inSnap = snap; killTw(s, ['lift']); s.lift = snap ? 0.12 : 0.3; } }
   }
@@ -4477,7 +4636,7 @@
     cam.x = cl.x; cam.y = cl.y; cam.h = cl.h;
   }
   const followCam = e => { // a held piece stays under the pointer while the camera moves
-    if (drag && drag.piece && drag.scaled) { drag.s.sc = drag.s.tp.sc; const p = toW(e); drag.s.x = p.w[0] + drag.ox; drag.s.y = p.w[1] + drag.oy; }
+    if (drag && drag.piece && drag.scaled) { drag.s.sc = drag.s.tp.sc; placeDragged(e); }
     if (twinDrag && twinDrag.moved) { const p = toW(e); twinDrag.tw.s.x = p.w[0] + twinDrag.ox; twinDrag.tw.s.y = p.w[1] + twinDrag.oy; }
   };
   let zoomK = null; // the step (0 = the whole continent or world, 3 = the closest) the + and - buttons last aimed at
@@ -4518,7 +4677,55 @@
   B.cv.addEventListener('click', () => { if (pendingFocus) { focusNameInput(); pendingFocus = false; } });
   addEventListener('keydown', e => { if (isPhonePortrait()) return; if (inp && document.activeElement === inp) return; idleTime = 0; if (attract) { stopAttract(); return; } if (needFirstPick) { needFirstPick = false; openPicker('pick'); return; } if (picker) { if (e.key === 'Escape' && currentPlayer()) closePicker(true); return; } if (passport) { if (e.key === 'Escape') { e.preventDefault(); closePassport(true); } else if (e.key === 'ArrowRight') { e.preventDefault(); turnPassport(1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); turnPassport(-1); } return; } const k = e.key.toLowerCase(); if (k === 'r' || k === ' ') { if (mode === 'map' && RD && RD.piece) turn(RD.piece); else if (mode === 'world' && nextCont()) beginRound(nextCont()); } else if (k === 'enter' && mode === 'world' && nextCont()) beginRound(nextCont()); else if (k === 'h') press('hint'); else if (k === 'z' || k === 'u') press('undo'); else if (k === 'escape' || k === 'w') press('world'); else if (k === 's') press('sound'); else if (!e.ctrlKey && !e.metaKey && (k === '+' || k === '=' || k === '-') && zoomable()) press(k === '-' ? 'zoomOut' : 'zoomIn'); });
   let resizeTmr = null, lastCam = { x: cam.x, y: cam.y, h: cam.h }, camStill = 0;
-  addEventListener('resize', () => { asp = innerWidth / innerHeight; clearTimeout(resizeTmr); resizeTmr = setTimeout(rebakeFonts, 150); });
+  function onResizeSettled() {
+    rebakeFonts();
+    if (drag || twinDrag || (AM.on && AM.pull) || isPhonePortrait()) return;
+    if (mode === 'flags' && RD && RD.parts && RD.parts.length) {
+      if (RD.parts.every(p => !p.ok || p.placed)) return;
+      const placedIdx = RD.parts.filter(p => p.ok && p.placed).map(p => p.idx);
+      const wasMemHidden = RD.memory && !RD.memShowing;
+      timers = timers.filter(t => t.tag !== 'peek' && t.tag !== 'rd');
+      if (RD.fl) {
+        for (const s of RD.fl) kill(s);
+        const flSet = new Set(RD.fl);
+        RD.tmp = RD.tmp.filter(s => !flSet.has(s) && S.includes(s));
+        RD.fl = [];
+      }
+      for (const s of RD.tmp) if (s.ghost) kill(s);
+      RD.tmp = RD.tmp.filter(s => S.includes(s));
+      startFlag(true);
+      if (wasMemHidden && RD.back) {
+        timers = timers.filter(t => t.tag !== 'peek');
+        RD.back.alpha = 1; RD.memShowing = false;
+        setHint('Build ' + inSent(RD.list[RD.fi]) + ' from memory');
+      }
+      for (const idx of placedIdx) {
+        const p = RD.parts.find(q => q.ok && !q.placed && q.idx === idx);
+        if (p) placePart(p, p, true);
+      }
+    } else if (mode === 'map' && RD && playerLevel() === 'own') {
+      const K0 = contFrame(RD.ct);
+      RD.baseCam = K0; RD.cam = K0; RD.vh = K0.h;
+      camTo(K0.x, K0.y, K0.h, 0.3);
+      if (RD.piece && RD.piece.waiting) { syncWaitingPiece(RD.piece); RD.piece.home = [RD.piece.x, RD.piece.y]; }
+    } else if (mode === 'map' && RD && playerLevel() !== 'own' && RD.piece) {
+      const s = RD.piece, f = framePiece(s.c);
+      RD.cam = f.K; RD.vh = f.K.h;
+      camTo(f.K.x, f.K.y, f.K.h, 0.3);
+      s.tp = f.best.tp; s.home = [f.best.x, f.best.y];
+      tw(s, { x: f.best.x, y: f.best.y, sc: f.best.tp.sc }, 0.3, { cut: true });
+      if (s.c.isCard && f.best.cardRect && RD.card) {
+        const cr = f.best.cardRect;
+        RD.card.x = cr.x; RD.card.y = cr.y; RD.card.w = cr.s; RD.card.h = cr.s;
+        syncLeader();
+      }
+      if (RD.ghost) { kill(RD.ghost); RD.ghost = null; }
+    } else if (mode === 'world' && !passport && !picker && !isZoomedIn()) {
+      const wf = worldFrame();
+      camTo(wf.x, wf.y, wf.h, 0.3);
+    }
+  }
+  addEventListener('resize', () => { asp = innerWidth / innerHeight; clearTimeout(resizeTmr); resizeTmr = setTimeout(onResizeSettled, 150); });
   if (window.matchMedia) {
     let mq = null;
     const watchDpr = () => {
@@ -5160,13 +5367,14 @@
   function amDown(e, p) {
     if (AM.pull) { amCancelPull(); return; } // a second finger cancels the pull and is ignored
     if (AM.card && AM.card.kind === 'story') { if (T - AM.card.t0 > 0.4) amCardClose(); return; } // the story card: a tap anywhere closes it
-    for (const id of ['mailMap', 'world', 'sound', 'hint']) {
-      const s = btn[id];
-      if (s && s.alpha > 0.5 && hit(s, p.hx, p.hy, 8)) { s.lift = 0.15; tw(s, { lift: 0 }, 0.3); if (id === 'mailMap') { AM.hintCam = false; amToggleMap(); } else if (id === 'hint') amHint(Math.min(2, AM.hintN + 1)); else press(id); return; }
-    }
+    const hPx = hudPx();
+    const amBtns = ['mailMap', 'world', 'sound', 'hint'].map(id => ({ id, s: btn[id] })).filter(q => q.s && q.s.alpha > 0.5);
+    const bh = pickHit(amBtns, p.hx, p.hy, 8, hPx, q => q.s);
+    if (bh) { bh.s.lift = 0.15; tw(bh.s, { lift: 0 }, 0.3); if (bh.id === 'mailMap') { AM.hintCam = false; amToggleMap(); } else if (bh.id === 'hint') amHint(Math.min(2, AM.hintN + 1)); else press(bh.id); return; }
     if (AM.box) { amBoxDown(p); return; } // the letter box takes every other tap
-    if (playerBtn.alpha > 0.5 && hit(playerBtn, p.hx, p.hy, 8)) { startWobble(playerBtn); return; }
-    for (const st of AM.stamps) if (hit(st.s, p.hx, p.hy, 4)) { if (st.c) speakCountry(st.c, true); return; }
+    if (playerBtn.alpha > 0.5 && hitMin(playerBtn, p.hx, p.hy, 8, hPx)) { startWobble(playerBtn); return; }
+    const sh = pickHit(AM.stamps, p.hx, p.hy, 4, hPx, st => st.s);
+    if (sh) { if (sh.c) speakCountry(sh.c, true); return; }
     if (AM.env && hit(AM.env, p.hx, p.hy, 0)) { if (AM.state === 'rest') { AM.env.lift = 0.15; tw(AM.env, { lift: 0 }, 0.25, { cut: true }); amBoxOpen(); } return; } // the envelope is the button of the letter box
     if (AM.frame === 'map') { if (AM.plane && hit(AM.plane, p.w[0], p.w[1], 14 * cam.h / 330)) amToggleMap(); return; }
     if (AM.state !== 'rest') return; // in the air, at sea or landing: only the HUD answers
@@ -5323,6 +5531,7 @@
     const mIds = hintOn ? ['mailMap', 'world', 'hint', 'sound'] : ['mailMap', 'world', 'sound'], mRight = hintOn ? ['sound', 'world', 'mailMap', 'hint'] : ['sound', 'world', 'mailMap'];
     for (const id of mIds) btn[id].rot = btn[id].tilt + wobbleRot(btn[id]);
     if (asp < 0.9) {
+      title.alpha = 1;
       const pad = 24, maxW = Math.max(120, W - pad * 2), tGap = 10;
       const totW = title.bw + (hasP ? tGap + playerBtn.bw : 0), ts = Math.min(1, maxW / totW);
       title.w = title.bw * ts; title.h = title.bh * ts; title.x = pad + title.w / 2; title.y = 20 + title.h / 2;
@@ -5332,7 +5541,35 @@
       let x = pad, rowY = title.y + title.h / 2 + 10, rowH = 0;
       for (const id of ids) { const s = btn[id]; s.alpha = 1; s.w = s.bw * bs; s.h = s.bh * bs; s.x = x + s.w / 2; s.y = rowY + s.h / 2; x += s.w + gap * bs; rowH = Math.max(rowH, s.h); }
       if (hintS) { const k = Math.min(1, maxW / hintS.bw); hintS.w = hintS.bw * k; hintS.h = hintS.bh * k; hintS.x = pad + hintS.w / 2; hintS.y = rowY + rowH + 10 + hintS.h / 2; }
+    } else if (PHONE && !picker) {
+      title.alpha = 0;
+      const padX = 24, gap = 14;
+      playerBtn.w = playerBtn.bw; playerBtn.h = playerBtn.bh;
+      const leftEdge = hasP ? padX + playerBtn.w + gap : padX;
+      const availBtnW = Math.max(120, W - padX - leftEdge);
+      const rawW = mRight.reduce((a, id) => a + btn[id].bw, 0) + gap * Math.max(0, mRight.length - 1);
+      const bs = Math.min(1, availBtnW / Math.max(1, rawW));
+      const btnH = btn.sound.bh * bs;
+      const rowH = Math.max(btnH, hasP ? playerBtn.h : 0);
+      const cy = 8 + rowH / 2;
+      playerBtn.x = padX + playerBtn.w / 2; playerBtn.y = cy;
+      let x = W - padX;
+      for (const id of mRight) { const s = btn[id]; s.alpha = 1; s.w = s.bw * bs; s.h = s.bh * bs; s.x = x - s.w / 2; s.y = cy; x -= s.w + gap * bs; }
+      const rightEdge = x + gap * bs - gap;
+      if (hintS) {
+        const availHint = rightEdge - leftEdge;
+        if (availHint >= hintS.bw * 0.75) {
+          const hs = Math.min(1, availHint / Math.max(1, hintS.bw));
+          hintS.w = hintS.bw * hs; hintS.h = hintS.bh * hs;
+          hintS.x = leftEdge + hintS.w / 2; hintS.y = cy;
+        } else {
+          const hs = Math.min(1, Math.max(120, W - padX * 2) / Math.max(1, hintS.bw));
+          hintS.w = hintS.bw * hs; hintS.h = hintS.bh * hs;
+          hintS.x = padX + hintS.w / 2; hintS.y = 8 + rowH + 8 + hintS.h / 2;
+        }
+      }
     } else {
+      title.alpha = 1;
       title.w = title.bw; title.h = title.bh; title.x = 34 + title.w / 2; title.y = 26 + title.h / 2;
       playerBtn.w = playerBtn.bw; playerBtn.h = playerBtn.bh; playerBtn.x = title.x + title.w / 2 + 14 + playerBtn.w / 2; playerBtn.y = title.y;
       if (hintS) { hintS.w = hintS.bw; hintS.h = hintS.bh; hintS.x = 34 + hintS.w / 2; hintS.y = title.y + title.h / 2 + 8 + hintS.h / 2; }
