@@ -68,6 +68,11 @@
   const proj = (lon, lat) => { let l = lon - LON0; if (l < -180) l += 360; if (l > 180) l -= 360; const th = Math.asin(MM * Math.sin(lat * Math.PI / 180)), t2 = th * th, t6 = t2 * t2 * t2; return [1000 + (l * Math.PI / 180) * Math.cos(th) / (MM * (A1 + 3 * A2 * t2 + t6 * (7 * A3 + 9 * A4 * t2))) * PS, 487 - th * (A1 + A2 * t2 + t6 * (A3 + A4 * t2)) * PS]; };
   const SEA = '#b5cfd0', PALE = '#e3d8bf', BLACK = '#0d0d0f', CREAM = '#efe8d8', INK = '#2a2a30';
   const B = GFX;
+  const PHONE = Q.has('phone') ? Q.get('phone') !== '0' && Q.get('phone') !== 'false' : (window.matchMedia ? matchMedia('(pointer: coarse)').matches : false) && Math.min(screen.width, screen.height) < 500;
+  const isPhonePortrait = () => PHONE && innerHeight > innerWidth;
+  const edgeHud = px => px * 1000 / Math.max(1, innerHeight);
+  const viewMetrics = () => { const r = B.cv.getBoundingClientRect(); return { iw: innerWidth, ih: innerHeight, cw: Math.round(r.width), ch: Math.round(r.height) }; };
+  const vpStr = () => { const v = viewMetrics(); return `window ${v.iw}x${v.ih} canvas ${v.cw}x${v.ch}`; };
   const initDpr = Math.min(2, window.devicePixelRatio || 1), initPx = Math.round(innerWidth * initDpr) * Math.round(innerHeight * initDpr);
   if (initPx > 4500000) B.setScale(Math.max(0.5, Math.sqrt(4500000 / initPx)));
   B.resize();
@@ -734,7 +739,7 @@
     if (f > 2) { s.wob = undefined; s.lift = 0; return 0; }
     s.lift = WOB_LIFT[Math.max(0, f)]; return WOB_ROT[Math.max(0, f)];
   };
-  function setHint(t) { if (t === hintTxt) return; hintTxt = t; if (hintS) { hintS.own = true; kill(hintS); } const tx = hintTex(t, devPerHud()); hintS = spr(tx, { hud: true, z: 0.1, zr: 0.03, order: 200 }); hintS.bw = hintS.w = tx.lw; hintS.bh = hintS.h = tx.lh; hintS.tilt = HUD_TILT.hint * DEG; hintS.rot = hintS.tilt; hintS.lift = 0.12; tw(hintS, { lift: 0 }, 0.25, { cut: true }); }
+  function setHint(t) { if (Q.has('vp')) t = vpStr(); if (t === hintTxt) return; hintTxt = t; if (hintS) { hintS.own = true; kill(hintS); } const tx = hintTex(t, devPerHud()); hintS = spr(tx, { hud: true, z: 0.1, zr: 0.03, order: 200 }); hintS.bw = hintS.w = tx.lw; hintS.bh = hintS.h = tx.lh; hintS.tilt = HUD_TILT.hint * DEG; hintS.rot = hintS.tilt; hintS.lift = 0.12; tw(hintS, { lift: 0 }, 0.25, { cut: true }); }
   const btn = {}, btnMeta = {};
   const isZoomBtn = id => id === 'zoomIn' || id === 'zoomOut';
   const zoomBtnHud = () => Math.max(64, 46 * 1000 / Math.max(1, innerHeight)); // the + and - buttons: at least 44 px on screen
@@ -881,6 +886,93 @@
     const tw2 = B.tex(b, { noMip: true }); tw2.lw = b.w / sc; tw2.lh = b.h / sc;
     return tw2;
   }
+  let turnBg = null, turnCard = null, turnLbl = null, turnCardSize = [360, 316], wasPhonePortrait = false, nextTurnWob = 0;
+  let turnBgTex = null;
+  function turnCardTex(cw, ch, sc) {
+    const W = Math.round(cw * sc), H = Math.round(ch * sc), k = W / cw;
+    const t = shapeTex(W, H, b => {
+      B.paper(b, wob(8 * k, 8 * k, W - 8 * k, H - 8 * k, 12 * k, 701), '#cdb995', 0.34);
+      const q = b.c;
+      q.strokeStyle = 'rgba(60,64,80,0.22)'; q.lineWidth = 2.0 * k; q.setLineDash([10 * k, 7 * k]);
+      q.strokeRect(22 * k, 22 * k, W - 44 * k, H - 44 * k); q.setLineDash([]);
+      const cx = W * 0.5, cy = H * 0.37;
+      // ghost landscape phone outline on the right
+      const gx = cx + 24 * k, gy = cy + 12 * k, gw = 122 * k, gh = 70 * k;
+      q.strokeStyle = 'rgba(60,64,80,0.32)'; q.lineWidth = 2.4 * k; q.setLineDash([8 * k, 5 * k]);
+      q.strokeRect(gx - gw * 0.5, gy - gh * 0.5, gw, gh); q.setLineDash([]);
+      // upright cut-paper phone on the left
+      const px = cx - 44 * k, py = cy + 2 * k, pw = 72 * k, ph = 124 * k;
+      B.paper(b, cutEdge(px - pw * 0.5, py - ph * 0.5, px + pw * 0.5, py + ph * 0.5, 5.5 * k, 703), PAP[1], 0.55);
+      const sx0 = px - pw * 0.5 + 8 * k, sy0 = py - ph * 0.5 + 15 * k, sx1 = px + pw * 0.5 - 8 * k, sy1 = py + ph * 0.5 - 17 * k;
+      B.paper(b, wob(sx0, sy0, sx1, sy1, 2.5 * k, 704), SEA, 0.68);
+      // tiny cut-paper continents on the phone screen
+      B.paper(b, x => { x.moveTo(px - 16 * k, py - 24 * k); x.lineTo(px + 4 * k, py - 28 * k); x.lineTo(px + 10 * k, py - 10 * k); x.lineTo(px - 8 * k, py - 2 * k); x.closePath(); }, PAP[6], 0.78);
+      B.paper(b, x => { x.moveTo(px - 6 * k, py + 8 * k); x.lineTo(px + 18 * k, py + 4 * k); x.lineTo(px + 14 * k, py + 24 * k); x.lineTo(px - 12 * k, py + 20 * k); x.closePath(); }, PAP[5], 0.78);
+      B.paper(b, cutEdge(px - 10 * k, py - ph * 0.5 + 6 * k, px + 10 * k, py - ph * 0.5 + 10 * k, 1.5 * k, 705), '#5c5f68', 0.65);
+      B.paper(b, x => x.arc(px, py + ph * 0.5 - 9 * k, 4.2 * k, 0, 7), '#5c5f68', 0.65);
+      // curved cut-paper arrow sweeping clockwise from upright to sideways
+      const acx = cx + 10 * k, acy = cy + 16 * k, R = 60 * k, a0 = -1.45, a1 = -0.28, hw = 7.2 * k, steps = 14;
+      B.paper(b, x => {
+        for (let i = 0; i <= steps; i++) {
+          const a = lerp(a0, a1, i / steps), px_ = acx + Math.cos(a) * (R + hw), py_ = acy + Math.sin(a) * (R + hw);
+          if (i === 0) x.moveTo(px_, py_); else x.lineTo(px_, py_);
+        }
+        const nx = Math.cos(a1), ny = Math.sin(a1), ux = -ny, uy = nx;
+        const bx = acx + nx * R, by = acy + ny * R;
+        x.lineTo(bx + nx * 16 * k, by + ny * 16 * k);
+        x.lineTo(bx + ux * 24 * k, by + uy * 24 * k);
+        x.lineTo(bx - nx * 16 * k, by - ny * 16 * k);
+        for (let i = steps; i >= 0; i--) {
+          const a = lerp(a0, a1, i / steps);
+          x.lineTo(acx + Math.cos(a) * (R - hw), acy + Math.sin(a) * (R - hw));
+        }
+        x.closePath();
+      }, PAP[5], 0.80);
+    }, { noMip: true });
+    t.lw = cw; t.lh = ch; return t;
+  }
+  function ensureTurnCard() {
+    const sc = devPerHud(), W = 1000 * asp;
+    if (!turnBgTex) turnBgTex = shapeTex(16, 16, b => B.paper(b, x => x.rect(-2, -2, 20, 20), BLACK, 0.0), { noMip: true });
+    if (!turnBg) turnBg = spr(turnBgTex, { hud: true, z: 0.04, zr: 0, order: 240, alpha: 0, _turnCard: true });
+    if (!turnLbl) {
+      const lt = hintTex('Turn your phone', sc);
+      turnLbl = spr(lt, { hud: true, z: 0.16, zr: 0.03, order: 242, alpha: 0, _turnCard: true });
+      turnLbl.bw = turnLbl.w = lt.lw; turnLbl.bh = turnLbl.h = lt.lh; turnLbl.tilt = HUD_TILT.hint * DEG;
+    }
+    const cardW = Math.min(W * 0.85, Math.max(336, turnLbl.bw + 44)), cardH = cardW * 0.88;
+    if (!turnCard) {
+      turnCardSize = [cardW, cardH];
+      const ct = turnCardTex(cardW, cardH, sc);
+      turnCard = spr(ct, { hud: true, z: 0.14, zr: 0.03, order: 241, alpha: 0, _turnCard: true });
+      turnCard.bw = turnCard.w = ct.lw; turnCard.bh = turnCard.h = ct.lh; turnCard.tilt = -0.8 * DEG;
+    }
+  }
+  function rebakeTurnCard() {
+    if (!turnCard || !turnLbl) return;
+    const sc = devPerHud(), W = 1000 * asp;
+    B.freeTex(turnLbl.tex);
+    const lt = hintTex('Turn your phone', sc);
+    turnLbl.tex = lt; turnLbl.bw = turnLbl.w = lt.lw; turnLbl.bh = turnLbl.h = lt.lh;
+    const cardW = Math.min(W * 0.85, Math.max(336, turnLbl.bw + 44)), cardH = cardW * 0.88;
+    turnCardSize = [cardW, cardH];
+    B.freeTex(turnCard.tex);
+    const ct = turnCardTex(cardW, cardH, sc);
+    turnCard.tex = ct; turnCard.bw = turnCard.w = ct.lw; turnCard.bh = turnCard.h = ct.lh;
+  }
+  function layoutTurnCard() {
+    ensureTurnCard();
+    const W = 1000 * asp;
+    const cardW = Math.min(W * 0.85, Math.max(336, turnLbl.bw + 44)), cardH = cardW * 0.88;
+    if (Math.abs(cardW - turnCardSize[0]) > 2) rebakeTurnCard();
+    turnBg.x = W * 0.5; turnBg.y = 500; turnBg.w = W + 24; turnBg.h = 1024; turnBg.alpha = 1;
+    turnCard.w = cardW; turnCard.h = cardH; turnCard.x = W * 0.5; turnCard.y = 500; turnCard.alpha = 1;
+    const ls = Math.min(1, (cardW - 32) / Math.max(1, turnLbl.bw));
+    turnLbl.w = turnLbl.bw * ls; turnLbl.h = turnLbl.bh * ls;
+    turnLbl.x = W * 0.5; turnLbl.y = 500 + cardH * 0.29; turnLbl.alpha = 1;
+    turnCard.rot = turnCard.tilt + wobbleRot(turnCard);
+    turnLbl.rot = turnLbl.tilt + wobbleRot(turnLbl);
+  }
   function rebakeFonts() {
     B.resize();
     lastHudDevH = B.size()[1];
@@ -895,6 +987,7 @@
     if (picker) rebuildPicker();
     if (typeof rebuildPassport === 'function' && passport) rebuildPassport(false);
     if (mode === 'mail') amRebake(); // air mail
+    if (turnCard) rebakeTurnCard();
     layoutHud();
   }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(rebakeFonts);
@@ -1738,7 +1831,7 @@
   // the mat's scale in tidy rows to the right of and below the mat, with the model flag first; nothing under the HUD or the rail.
   // Straight-cut offcuts in the round's flag papers, in three sizes, fill some of the free table.
   const tableRect = camH => { layoutHud(); const K = { x: T0.x, y: T0.y, h: camH }, W = 1000 * asp, hb = Math.max(topHudBottom(), title.y + title.h / 2 + 8 + 38 * 0.86 * 1.65 + 4) + 18; // room for the hint line even before it is set
-    const a = h2wAt(K, 190, hb), b = h2wAt(K, W - 24, 1000 - 22); return [a[0], a[1], b[0], b[1]]; };
+    const a = h2wAt(K, 190, hb), b = h2wAt(K, W - 24, 1000 - Math.max(22, edgeHud(36))); return [a[0], a[1], b[0], b[1]]; };
   const tableFHmax = (f, camH) => { const u = tableRect(camH); return Math.max(40, Math.min(0.6 * camH / (380 / 300), (u[2] - u[0]) * 0.62 / ((f.a * 300 + 80) / 300), (u[3] - u[1]) / (380 / 300))); };
   const matTex = (f, c, k) => shapeTex((f.a * 300 + 80) * k, 380 * k, b => { B.paper(b, wob(6 * k, 6 * k, b.w - 6 * k, b.h - 6 * k, 10 * k, sid(c.id)), '#c9d3bd', 0.5); const x = b.c; x.strokeStyle = 'rgba(60,64,80,0.5)'; x.lineWidth = 1.4 * k; x.setLineDash([10 * k, 4 * k, 3 * k, 4 * k]); x.strokeRect(40 * k, 40 * k, f.a * 300 * k, 300 * k); x.setLineDash([]); x.strokeStyle = 'rgba(60,64,80,0.16)'; x.beginPath(); x.moveTo(40 * k, 190 * k); x.lineTo(b.w - 40 * k, 190 * k); x.moveTo(b.w / 2, 40 * k); x.lineTo(b.w / 2, 340 * k); x.stroke(); });
   function tableLayout(c, f, mat, model, back, parts, R, camH) {
@@ -1991,7 +2084,7 @@
     const co = Math.abs(Math.cos(s.rot)), si = Math.abs(Math.sin(s.rot));
     const wHud = (co * s.w + si * s.h) * scHud, hHud = (si * s.w + co * s.h) * scHud;
     let hx = 1000 * asp - 28 - wHud * 0.5 - 10;
-    let hy = 1000 - 28 - hHud * 0.5;
+    let hy = 1000 - Math.max(28, edgeHud(36)) - hHud * 0.5;
     const edge = Math.max(18, 12 / Math.max(0.1, pxHud) + 2); // at least 12 px inside the screen
     if (s.c && s.c !== AQ && FL[s.c.id]) { // batch 4: the flag on its pole stands right of the anchor; keep it on screen
       const d = anchorDelta(s.c), axHud = (d[0] * Math.cos(s.rot) - d[1] * Math.sin(s.rot)) * scHud, flagR = 17 * 1000 / 330 * FL[s.c.id].a * 1.04 + 4;
@@ -2194,7 +2287,7 @@
     const hwHud = (co * s.w + si * s.h) * scHud * 0.5, hhHud = (si * s.w + co * s.h) * scHud * 0.5;
     if (!pileGust || pileGust.K !== K || pileGust.n !== total) pileGust = { K, n: total, ct: wind ? wind.ct : (RD && RD.ct), a: pileSpot(K, (wind && wind.ct) || (RD && RD.ct) || CI.sa, total <= 2 ? [44 + pileLongHud / 2, 14 + pileLongHud * 0.45, 28 + pileLongHud / 2, 12 + pileLongHud * 0.45] : [58 + pileLongHud / 2, 18 + pileLongHud * 0.45, 24 + pileLongHud / 2, 22 + pileLongHud * 0.45], { x: 1000 * asp - 115, y: 888 }, []) }; // batch 4: off the continent
     const hx = clamp(pileGust.a.x + dx, 190 + hwHud, 1000 * asp - hwHud - 22);
-    const hy = clamp(pileGust.a.y + dy, 300 + hhHud, 1000 - hhHud - 22);
+    const hy = clamp(pileGust.a.y + dy, 300 + hhHud, 1000 - hhHud - Math.max(22, edgeHud(36)));
     const w = h2wAt(K, hx, hy);
     return { hx, hy, wx: w[0], wy: w[1], sc: scWorld, rot };
   }
@@ -2230,7 +2323,7 @@
   // batch 4: the pile of lifted pieces lies where it covers no country of the continent being played (judged for the camera the
   // round is heading to); it moves there in stop-motion when that changes
   function pileSpot(K, ct, ext, def, obst) { // ext: the pile's box around its anchor in HUD units [left, up, right, down]
-    const W = 1000 * asp, hb = topHudBottom() + 16, railR = 190;
+    const W = 1000 * asp, hb = topHudBottom() + 16, railR = 190, botPad = Math.max(22, edgeHud(36));
     const boxOf = a => [a.x - ext[0], a.y - ext[1], a.x + ext[2], a.y + ext[3]];
     const land = b => { // sample the pile's box against the continent's countries
       const w0 = h2wAt(K, b[0], b[1]), w1 = h2wAt(K, b[2], b[3]); let hits = 0;
@@ -2238,10 +2331,10 @@
         for (let j = 0; j <= 4; j++) for (let i = 0; i <= 6; i++) if (pipPolys(w0[0] + (w1[0] - w0[0]) * i / 6, w0[1] + (w1[1] - w0[1]) * j / 4, c.polys)) hits++;
         for (const r of c.polys) for (let i = 0; i < r.length; i += 4) if (r[i] > w0[0] && r[i] < w1[0] && r[i + 1] > w0[1] && r[i + 1] < w1[1]) { hits++; break; } }
       return hits; };
-    const xs = [def.x, W - 22 - ext[2], W * 0.75, W * 0.5, railR + ext[0]], ys = [def.y, 1000 - 22 - ext[3], 700, 500, hb + ext[1]];
+    const xs = [def.x, W - 22 - ext[2], W * 0.75, W * 0.5, railR + ext[0]], ys = [def.y, 1000 - botPad - ext[3], 700, 500, hb + ext[1]];
     let best = def, bs = 1e18;
     for (const y of ys) for (const x of xs) {
-      const a = { x: clamp(x, railR + ext[0], W - 22 - ext[2]), y: clamp(y, hb + ext[1], 1000 - 22 - ext[3]) }, b = boxOf(a);
+      const a = { x: clamp(x, railR + ext[0], W - 22 - ext[2]), y: clamp(y, hb + ext[1], 1000 - botPad - ext[3]) }, b = boxOf(a);
       let ov = 0; for (const o of obst) ov += Math.max(0, Math.min(b[2], o[2]) - Math.max(b[0], o[0])) * Math.max(0, Math.min(b[3], o[3]) - Math.max(b[1], o[1]));
       const sc = land(b) * 1e5 + ov * 10 + Math.hypot(a.x - def.x, a.y - def.y);
       if (sc < bs) { bs = sc; best = a; }
@@ -2587,7 +2680,7 @@
     if (s.flag) { s.flag.flutT = T + 0.3; }
     for (let i = 0; i < 6; i++) { const b = spr(birdT, { x: ac[0] + (hs(i, 3, frame) - 0.5) * 14 * vs, y: ac[1], w: 9 * vs, h: 5.4 * vs, z: 0.23, zr: 0.01, order: 150, alpha: 0 }); b.bird = { t0: T + 0.3 + i * 0.07, vx: (hs(i, 7, frame) - 0.5) * 60 * vs, vy: -(30 + hs(i, 8, frame) * 40) * vs, ph: i }; }
     if (!attract) setHint(inSent(c, true) + ' is awake');
-    if (RD.auto) after(3.4, () => { hideCountry(c); c.built = false; goWorld(1.4); after(2.4, () => { if (attract) beginRound(CI.sa, { auto: true, only: ++attractN }); }, 'at'); }, 'rd'); else after(1.5, nextPiece, 'rd');
+    if (RD.auto) after(3.4, () => { hideCountry(c); c.built = false; goWorld(1.4); scheduleAttract(2.4, ++attractN); }, 'rd'); else after(1.5, nextPiece, 'rd');
   }
   function wake(s, delay) { s.wakeAt = T + delay; }
   function roundDone() {
@@ -2816,6 +2909,7 @@
     else openPicker('pick');
   }
   if (inp) {
+    inp.addEventListener('blur', () => { scrollTo(0, 0); });
     inp.addEventListener('input', () => {
       const v = inp.value.replace(/[\r\n]/g, '').slice(0, 12);
       if (inp.value !== v) inp.value = v;
@@ -3989,6 +4083,7 @@
     else setHint('First build ' + n.name);
   }
   function onDown(e) {
+    if (isPhonePortrait()) return;
     idleTime = 0;
     if (attract) { stopAttract(); return; }
     if (hold || drag || twinDrag || pinch) return;
@@ -4177,9 +4272,10 @@
     if (hold && e.pointerId !== hold.id) return;
     const wasPan = pan && e.pointerId === pan.id;
     if (wasPan) { pan = null; }
+    const cancelled = e.type === 'pointercancel';
     if (worldTap && e.pointerId === worldTap.id) {
       const wt = worldTap; worldTap = null;
-      if (Math.hypot(e.clientX - wt.sx, e.clientY - wt.sy) < 7 && performance.now() - wt.t < 450 && mode === 'world') {
+      if (!cancelled && Math.hypot(e.clientX - wt.sx, e.clientY - wt.sy) < 7 && performance.now() - wt.t < 450 && mode === 'world') {
         handleWorldTap(wt.wx, wt.wy);
       }
       return;
@@ -4188,6 +4284,11 @@
       const td = twinDrag; twinDrag = null;
       const twObj = td.tw, s = twObj.s;
       const moved = Math.hypot(e.clientX - td.sx, e.clientY - td.sy);
+      if (cancelled) {
+        if (!td.existing) sendTwinHome(twObj, false);
+        else { const idx = twins.indexOf(twObj); s.order = 70 + idx; tw(s, { z: restZFor(idx) }, 0.14, { cut: true }); }
+        return;
+      }
       if (!td.moved && moved < 7 && performance.now() - td.t < 450) {
         bringTwinToFront(twObj);
         turn(s);
@@ -4213,7 +4314,7 @@
     }
     if (mapTap && e.pointerId === mapTap.id) {
       const mt = mapTap; mapTap = null;
-      if (Math.hypot(e.clientX - mt.sx, e.clientY - mt.sy) < 7 && performance.now() - mt.t < 450 && mode === 'map' && RD && !RD.auto) {
+      if (!cancelled && Math.hypot(e.clientX - mt.sx, e.clientY - mt.sy) < 7 && performance.now() - mt.t < 450 && mode === 'map' && RD && !RD.auto) {
         handleMapTap(toW(e));
       }
       if (wasPan) return;
@@ -4224,7 +4325,7 @@
       const h = hold;
       const elapsed = T - h.t0, moved = Math.hypot(e.clientX - h.sx, e.clientY - h.sy);
       resetHoldPose(); hold = null;
-      if (elapsed < 0.35 && moved < 14 && picker && picker.kind === 'pick') {
+      if (!cancelled && elapsed < 0.35 && moved < 14 && picker && picker.kind === 'pick') {
         if (h.inName) { openPicker('editName', { player: h.player, isNew: false }); seedNameInput(h.player); }
         else if (h.inLevel) {
           h.player.level = cleanLevel(h.player.level) === 'help' ? 'own' : 'help';
@@ -4239,32 +4340,39 @@
     if (d.piece) {
       if (d.wasReturning && !d.scaled) { s.waiting = true; syncWaitingPiece(s); }
       const rotOk = Math.abs(Math.sin(s.rot / 2)) < 0.05 || Math.abs(((s.rot % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) < 0.05;
-      if (moved < 7 && performance.now() - d.t < 450 && (RD.ct.rotate || !rotOk)) { turn(s); tw(s, { lift: 0.12 }, 0.18, { cut: true }); return; }
+      if (!cancelled && moved < 7 && performance.now() - d.t < 450 && (RD.ct.rotate || !rotOk)) { turn(s); tw(s, { lift: 0.12 }, 0.18, { cut: true }); return; }
       if (s.waiting) { tw(s, { lift: 0.12 }, 0.18, { cut: true }); return; }
       const dist = Math.hypot(s.x - s.tp.x, s.y - s.tp.y), tol = pieceTolW(s);
-      if (dist < tol && rotOk) return landPiece(s);
-      RD.miss++; sfx.back();
-      if (dist < tol) { setHint('Turn it first. Tap the piece'); tw(s, { lift: 0.12 }, 0.18, { cut: true }); s.wig = T; return; }
+      if (!cancelled && dist < tol && rotOk) return landPiece(s);
+      if (!cancelled) {
+        RD.miss++; sfx.back();
+        if (dist < tol) { setHint('Turn it first. Tap the piece'); tw(s, { lift: 0.12 }, 0.18, { cut: true }); s.wig = T; return; }
+      }
       s._piv = null; s._rotTo = undefined;
       if (playerLevel() === 'own') {
         s.returning = { fromX: s.x, fromY: s.y, fromSc: s.sc, t0: T, dur: 0.42 };
         tw(s, { lift: 0.12 }, 0.42, { cut: true });
-        setHint(RD.ct.outlines || s.c.isCard ? 'Not there. Find the same shape' : 'Not there. Look at the neighbours');
-        if (RD.miss >= 4) applyHintStep(2);
-        else if (RD.miss >= 2) applyHintStep(1);
+        if (!cancelled) {
+          setHint(RD.ct.outlines || s.c.isCard ? 'Not there. Find the same shape' : 'Not there. Look at the neighbours');
+          if (RD.miss >= 4) applyHintStep(2);
+          else if (RD.miss >= 2) applyHintStep(1);
+        }
       } else {
         tw(s, { x: s.home[0], y: s.home[1], lift: 0.12 }, 0.42, { cut: true });
-        setHint(RD.ct.outlines || s.c.isCard ? 'Not there. Find the same shape' : 'Not there. Look at the neighbours');
-        if (RD.miss >= 2) showGhost();
+        if (!cancelled) {
+          setHint(RD.ct.outlines || s.c.isCard ? 'Not there. Find the same shape' : 'Not there. Look at the neighbours');
+          if (RD.miss >= 2) showGhost();
+        }
       }
       return;
     }
     // flag part
-    const near = isPartSnap(s);
-    const onMat = Math.abs(s.x - RD.mx) < FL[RD.list[RD.fi].id].a * RD.FH / 2 + 20 && Math.abs(s.y - RD.my) < RD.FH / 2 + 20;
+    const near = cancelled ? null : isPartSnap(s);
+    const onMat = !cancelled && Math.abs(s.x - RD.mx) < FL[RD.list[RD.fi].id].a * RD.FH / 2 + 20 && Math.abs(s.y - RD.my) < RD.FH / 2 + 20;
     if (near) return placePart(s, near);
-    sfx.back(); tw(s, { x: s.hx, y: s.hy, rot: s.hr, sc: s.ts, lift: 0 }, 0.4, { cut: true, done: () => { s.order = 40; } });
-    if (onMat) { if (!s.ok) setHint('That part is from another flag'); else setHint('Not there. Look where it sits'); const m = RD.model; if (RD.memory) peek(true); else { m.lift = 0.2; tw(m, { lift: 0 }, 0.8); } } else if (moved > 30) setHint('Drop it on the mat');
+    if (!cancelled) sfx.back();
+    tw(s, { x: s.hx, y: s.hy, rot: s.hr, sc: s.ts, lift: 0 }, 0.4, { cut: true, done: () => { s.order = 40; } });
+    if (onMat) { if (!s.ok) setHint('That part is from another flag'); else setHint('Not there. Look where it sits'); const m = RD.model; if (RD.memory) peek(true); else { m.lift = 0.2; tw(m, { lift: 0 }, 0.8); } } else if (!cancelled && moved > 30) setHint('Drop it on the mat');
   }
   function showGhost() { const s = RD.piece; if (!s || RD.ghost) return; const g = spr(s.tex, { x: s.tp.x, y: s.tp.y, w: s.w, h: s.h, sc: s.tp.sc, z: 0.19, zr: 0.02, order: 19 + 30, alpha: 0.4, tint: [1.25, 1.2, 1.05] }); g.ghost = T; RD.ghost = g; RD.tmp.push(g); after(3, () => { kill(g); if (RD) RD.ghost = null; }, 'rd'); }
   function press(id) {
@@ -4408,7 +4516,7 @@
     idleTime = 0; zoomAt(e.clientX, e.clientY, gest.h0 * Math.pow(e.scale, -1.6) / cam.h); followCam(e);
   }, { passive: false });
   B.cv.addEventListener('click', () => { if (pendingFocus) { focusNameInput(); pendingFocus = false; } });
-  addEventListener('keydown', e => { if (inp && document.activeElement === inp) return; idleTime = 0; if (attract) { stopAttract(); return; } if (needFirstPick) { needFirstPick = false; openPicker('pick'); return; } if (picker) { if (e.key === 'Escape' && currentPlayer()) closePicker(true); return; } if (passport) { if (e.key === 'Escape') { e.preventDefault(); closePassport(true); } else if (e.key === 'ArrowRight') { e.preventDefault(); turnPassport(1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); turnPassport(-1); } return; } const k = e.key.toLowerCase(); if (k === 'r' || k === ' ') { if (mode === 'map' && RD && RD.piece) turn(RD.piece); else if (mode === 'world' && nextCont()) beginRound(nextCont()); } else if (k === 'enter' && mode === 'world' && nextCont()) beginRound(nextCont()); else if (k === 'h') press('hint'); else if (k === 'z' || k === 'u') press('undo'); else if (k === 'escape' || k === 'w') press('world'); else if (k === 's') press('sound'); else if (!e.ctrlKey && !e.metaKey && (k === '+' || k === '=' || k === '-') && zoomable()) press(k === '-' ? 'zoomOut' : 'zoomIn'); });
+  addEventListener('keydown', e => { if (isPhonePortrait()) return; if (inp && document.activeElement === inp) return; idleTime = 0; if (attract) { stopAttract(); return; } if (needFirstPick) { needFirstPick = false; openPicker('pick'); return; } if (picker) { if (e.key === 'Escape' && currentPlayer()) closePicker(true); return; } if (passport) { if (e.key === 'Escape') { e.preventDefault(); closePassport(true); } else if (e.key === 'ArrowRight') { e.preventDefault(); turnPassport(1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); turnPassport(-1); } return; } const k = e.key.toLowerCase(); if (k === 'r' || k === ' ') { if (mode === 'map' && RD && RD.piece) turn(RD.piece); else if (mode === 'world' && nextCont()) beginRound(nextCont()); } else if (k === 'enter' && mode === 'world' && nextCont()) beginRound(nextCont()); else if (k === 'h') press('hint'); else if (k === 'z' || k === 'u') press('undo'); else if (k === 'escape' || k === 'w') press('world'); else if (k === 's') press('sound'); else if (!e.ctrlKey && !e.metaKey && (k === '+' || k === '=' || k === '-') && zoomable()) press(k === '-' ? 'zoomOut' : 'zoomIn'); });
   let resizeTmr = null, lastCam = { x: cam.x, y: cam.y, h: cam.h }, camStill = 0;
   addEventListener('resize', () => { asp = innerWidth / innerHeight; clearTimeout(resizeTmr); resizeTmr = setTimeout(rebakeFonts, 150); });
   if (window.matchMedia) {
@@ -5864,7 +5972,41 @@
       }
     }
     if (tag) { const F2 = Math.floor(T * 12); tag.lift = 0.05 + 0.05 * Math.sin(F2 * 0.5); tag.y = tag.by + Math.sin(F2 * 0.5) * 2.5; tag.rot = -0.03 + Math.sin(F2 * 0.25) * 0.02; tag.alpha = (mode === 'world' && !picker && !passport) ? 1 : 0; if (tagPtr) { tagPtr.lift = tag.lift * 0.8; tagPtr.y = tagPtr.by + Math.sin(F2 * 0.5) * 2.5; tagPtr.alpha = tag.alpha; } }
+    if (Q.has('vp')) setHint(vpStr());
     layoutHud();
+    syncPhonePortrait();
+  }
+  function scheduleAttract(delay, onlyIdx) {
+    timers = timers.filter(t => t.tag !== 'at');
+    after(delay, () => {
+      if (!attract) return;
+      if (isPhonePortrait()) { scheduleAttract(0.8, onlyIdx); return; }
+      beginRound(CI.sa, { auto: true, only: onlyIdx });
+    }, 'at');
+  }
+  function syncPhonePortrait() {
+    if (isPhonePortrait()) {
+      if (!wasPhonePortrait) {
+        wasPhonePortrait = true;
+        activePtrs.clear();
+        pan = null; pinch = null; mapTap = null; worldTap = null;
+        if (hold) { resetHoldPose(); hold = null; }
+        if (AM.on && AM.pull) amCancelPull();
+        if (drag) onUp({ pointerId: drag.id, type: 'pointercancel', clientX: drag.sx, clientY: drag.sy });
+        if (twinDrag) onUp({ pointerId: twinDrag.id, type: 'pointercancel', clientX: twinDrag.sx, clientY: twinDrag.sy });
+        nextTurnWob = T + 1.8;
+      }
+      layoutTurnCard();
+      if (T >= nextTurnWob) { startWobble(turnCard); startWobble(turnLbl); nextTurnWob = T + 3.5; }
+      for (const s of S) if (s.hud && !s._turnCard) { if (s._savedAlpha === undefined) s._savedAlpha = s.alpha; s.alpha = 0; }
+    } else if (wasPhonePortrait) {
+      wasPhonePortrait = false;
+      if (turnBg) turnBg.alpha = 0;
+      if (turnCard) turnCard.alpha = 0;
+      if (turnLbl) turnLbl.alpha = 0;
+      for (const s of S) if (s._savedAlpha !== undefined) { s.alpha = s._savedAlpha; delete s._savedAlpha; }
+      layoutHud();
+    }
   }
   // ---------- start ----------
   const vq = (Q.get('view') || '').toLowerCase(); const vct = CONTS.find(c => c.id === vq || c.name.toLowerCase().replace(/ /g, '') === vq.replace(/[ _-]/g, ''));
@@ -5884,7 +6026,7 @@
   else if (vq === 'world' || Q.get('done') === 'all' || Q.has('noattract') || Q.has('player') || Q.has('compare')) { goWorld(0); if (Q.get('done') === 'all') after(0.6, wakeAll); else if (store.players.length >= 2 && !Q.has('player') && !Q.has('noattract') && !Q.has('compare')) needFirstPick = true; }
   else if (store.players.length === 1) { goWorld(0); }
   else if (store.players.length >= 2) { goWorld(0); needFirstPick = true; }
-  else { attract = true; goWorld(0); after(2.6, () => { if (attract) beginRound(CI.sa, { auto: true, only: 0 }); }, 'at'); }
+  else { attract = true; goWorld(0); scheduleAttract(2.6, 0); }
   const cmpQ = Q.get('compare');
   if (cmpQ && mode === 'world') {
     while (pending.length) {
@@ -5907,6 +6049,7 @@
   if (FREEZE !== null) { while (T < FREEZE) update(1 / 60); frozen = true; }
   window.__atlas = {
     fps: 0,
+    view: viewMetrics,
     rounds: () => CONTS.map(ct => ({ id: ct.id, name: ct.name, rounds: ct.rounds.map(rd => rd.map(c => ({ id: c.id, name: c.name, card: !!c.isCard }))) })),
     speechLog: () => speechLog.slice(),
     speechVoice: () => enVoice ? { name: enVoice.name, lang: enVoice.lang, localService: !!enVoice.localService } : null,
@@ -6005,6 +6148,7 @@
     if (mode === 'mail' && !frozen) amCamera(dt, AM.settled); // air mail: the camera follows with the real frame time
     updateZoomDetail(dt);
     syncDynamicOverlays();
+    syncPhonePortrait();
     const la = Math.atan2(0.6, -0.8) + (ptr[0] - 0.5) * 0.5, ll = 1; light = [Math.cos(la) * ll, Math.sin(la) * ll + (0.5 - ptr[1]) * 0.25]; const ln = Math.hypot(light[0], light[1]); light[0] /= ln; light[1] /= ln;
     S.sort((a, b) => a.order - b.order);
     B.draw(S, cam, light);

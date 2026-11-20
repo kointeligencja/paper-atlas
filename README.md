@@ -17,6 +17,7 @@ python3 -m http.server 8751
 ```
 
 and open `http://<your-computer's-address>:8751` on the tablet.
+On a phone: turn it sideways; Add to Home Screen gives the largest picture.
 
 Handy URL options: `?view=mail` opens Air Mail, `?view=mail&letter=J1` starts one letter,
 `?reset` clears all players and progress.
