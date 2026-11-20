@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>Flag check</title>
+<style>body{margin:0;background:#222;color:#ccc;font:9px sans-serif;display:flex;flex-wrap:wrap}div{width:192px;height:72px;position:relative}img,canvas{position:absolute;top:2px;height:56px;max-width:92px}img{left:2px}canvas{left:98px}span{position:absolute;bottom:0;left:2px}</style>
+<body><script src="../data/flags.js"></script><script src="../data/geo.js"></script>
+<script>
+const q=new URLSearchParams(location.search),from=+(q.get('from')||0),n=+(q.get('n')||100);
+const ids=Object.keys(FLAGS).slice(from,from+n);
+for(const id of ids){const f=FLAGS[id],d=document.createElement('div');const im=new Image();im.src='../flags-ref/'+id.toLowerCase()+'.svg';d.appendChild(im);
+const c=document.createElement('canvas');c.height=112;c.width=Math.round(112*f.a);const x=c.getContext('2d');
+for(const p of f.parts){if(p.polys)for(const g of p.polys){x.fillStyle=PAPERS[g.c];x.beginPath();for(let i=0;i<g.p.length;i+=2)x.lineTo(g.p[i]*112,g.p[i+1]*112);x.closePath();x.fill();x.strokeStyle=PAPERS[g.c];x.stroke();}else{const s=new Image();s.onload=()=>x.drawImage(s,p.x*112,p.y*112,p.w*112,p.h*112);s.src=p.img;}}
+d.appendChild(c);const sp=document.createElement('span');const cc=GEO.countries.find(k=>k.id===id);sp.textContent=id+' '+(cc?cc.name:'?')+' · '+f.parts.map(p=>p.k[0]).join('');d.appendChild(sp);document.body.appendChild(d);}
+</script>

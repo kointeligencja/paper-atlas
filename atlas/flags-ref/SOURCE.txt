@@ -1,0 +1,3 @@
+Flag reference set: https://github.com/hampusborgos/country-flags (SVG flags collected from Wikimedia Commons, public domain).
+Used as the reference for layout, proportions and colours; coats of arms are cropped from these files for the stickers.
+Borders: Natural Earth 1:50m admin 0 countries (public domain), simplified in tools/build.mjs.

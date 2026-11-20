@@ -1,0 +1,6 @@
+# private working material (reports, screenshots, notes)
+audit/
+BACKLOG.md
+.claude/
+.DS_Store
+node_modules/

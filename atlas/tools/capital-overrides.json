@@ -1,0 +1,57 @@
+[
+  {
+    "id": "KZ",
+    "name": "Astana",
+    "positionSource": "Natural Earth populated places (Nur-Sultan, same place)",
+    "reason": "Renamed from Nur-Sultan in 2022; same location."
+  },
+  {
+    "id": "BI",
+    "name": "Gitega",
+    "positionSource": "Natural Earth populated places (Gitega, Admin-1 capital)",
+    "reason": "Political capital of Burundi; Natural Earth primary is Bujumbura."
+  },
+  {
+    "id": "PW",
+    "name": "Ngerulmud",
+    "positionSource": "none (not in Natural Earth populated places)",
+    "reason": "Melekeok is the state; Ngerulmud is the capital."
+  },
+  {
+    "id": "TZ",
+    "name": "Dodoma",
+    "positionSource": "Natural Earth populated places (Dodoma, Admin-0 capital alt)",
+    "reason": "Official capital of Tanzania; Natural Earth primary is Dar es Salaam."
+  },
+  {
+    "id": "CI",
+    "name": "Yamoussoukro",
+    "positionSource": "Natural Earth populated places (Yamoussoukro, Admin-0 capital)",
+    "reason": "Official capital of Ivory Coast; Natural Earth primary was Abidjan."
+  },
+  {
+    "id": "BJ",
+    "name": "Porto-Novo",
+    "positionSource": "Natural Earth populated places (Porto-Novo, Admin-0 capital alt)",
+    "reason": "Official capital of Benin; Natural Earth primary is Cotonou."
+  },
+  {
+    "id": "BO",
+    "name": "Sucre",
+    "positionSource": "Natural Earth populated places (Sucre, Admin-0 capital)",
+    "reason": "Constitutional capital of Bolivia (owner's choice)."
+  },
+  {
+    "id": "LK",
+    "name": "Sri Jayawardenepura Kotte",
+    "positionSource": "Natural Earth populated places (Sri Jayawardenepura Kotte, Admin-0 capital alt)",
+    "reason": "Official capital of Sri Lanka (owner's choice)."
+  },
+  {
+    "id": "US",
+    "name": "Washington, D.C.",
+    "say": "Washington D C",
+    "positionSource": "Natural Earth populated places (Washington, Admin-0 capital)",
+    "reason": "Use Washington, D.C. on tag and speak as Washington D C."
+  }
+]
