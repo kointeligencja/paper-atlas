@@ -1585,7 +1585,9 @@
     function rebake() {
       K.freeSharedCaches();
       if (screen === 'box') {
-        openBox({ quiet: true, noAnim: true });
+        // a late web font rebakes the box at boot (?view=games): start the stamp celebration again on the new box
+        const nb = openBox({ quiet: true, noAnim: true });
+        if (nb) queueStampCelebrations(nb);
       } else if (screen === 'setup' && setupState) {
         const gid = setupState.gameId;
         openBox({ quiet: true, noAnim: true });
