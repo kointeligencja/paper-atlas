@@ -235,11 +235,16 @@
     }
 
     function ensureMat() {
-      if (matSprite && sprites.has(matSprite) && ctx.S.includes(matSprite)) return matSprite;
+      const asp = ctx.asp ? ctx.asp() : 1.6;
+      const needH = Math.max(3000, Math.ceil(2200 / Math.max(0.35, asp)));
+      if (matSprite && sprites.has(matSprite) && ctx.S.includes(matSprite)) {
+        if (matSprite.h < needH) matSprite.h = needH;
+        return matSprite;
+      }
       const tex = ctx.shapeTex(1200, 1000, b => {
         B.paper(b, ctx.wob(6, 6, 1194, 994, 8, 9103), COL.mat, 0.2);
       }, { noMip: true });
-      matSprite = spr(tex, { x: GT[0], y: GT[1], w: 2400, h: 2000, z: 0.045, zr: 0.05, order: 1, own: true });
+      matSprite = spr(tex, { x: GT[0], y: GT[1], w: 2400, h: needH, z: 0.045, zr: 0.05, order: 1, own: true });
       return matSprite;
     }
 
@@ -828,20 +833,81 @@
         else if (who && typeof who === 'object' && who.token && ctx.playerBtnTex) tex = ctx.playerBtnTex(who.token);
         else if (typeof who === 'string' && ctx.playerBtnTex) tex = ctx.playerBtnTex(who);
         if (tex) btn.tex = tex;
-        if (hop) {
-          const baseY = btn._baseY !== undefined ? btn._baseY : (btn._baseY = btn.y);
+        if (btn._hopBaseY !== undefined && Math.abs(btn.y - btn._hopBaseY) > 26) {
+          delete btn._hopBaseY;
+        }
+        if (hop && btn.alpha > 0.5) {
+          const baseY = btn._hopBaseY !== undefined ? btn._hopBaseY : (btn._hopBaseY = btn.y);
           tw(btn, { y: baseY - 22, lift: 0.24 }, 0.14, {
             cut: true,
-            done: () => tw(btn, { y: baseY, lift: 0 }, 0.20, { cut: true })
+            done: () => tw(btn, { y: baseY, lift: 0 }, 0.20, {
+              cut: true,
+              done: () => { delete btn._hopBaseY; }
+            })
           });
         }
       }
       if (swatchStyle) {
         const stex = swatchTex(swatchStyle);
-        const sx = btn ? (btn.x + (btn.w || 84) / 2 + 38) : 140;
-        const sy = btn ? btn.y : 60;
+        const swW = 56, swH = 40;
+        const W = 1000 * ctx.asp();
+        const hintS = ctx.hint ? ctx.hint() : null;
+        const visBtn = !!(btn && btn.alpha > 0.5 && (btn.w || 0) > 0 && (btn.h || 0) > 0);
+        const visHint = !!(hintS && hintS.alpha > 0.5 && (hintS.w || 0) > 0 && (hintS.h || 0) > 0);
+        const visTitle = !!(ctx.title && ctx.title.alpha > 0.5 && (ctx.title.w || 0) > 0 && (ctx.title.h || 0) > 0);
+        const btnY = visBtn ? (btn._hopBaseY !== undefined ? btn._hopBaseY : btn.y) : 60;
+
+        const obstacles = [];
+        if (visHint) obstacles.push(hintS);
+        if (visTitle) obstacles.push(ctx.title);
+        if (visBtn) obstacles.push({ x: btn.x, y: btnY, w: btn.w, h: btn.h });
+        if (ctx.btn) {
+          for (const id of Object.keys(ctx.btn)) {
+            const b = ctx.btn[id];
+            if (b && b.alpha > 0.5 && (b.w || 0) > 0 && (b.h || 0) > 0) obstacles.push(b);
+          }
+        }
+
+        const fits = (cx, cy) => {
+          if (cx - swW * 0.5 < 8 || cx + swW * 0.5 > W - 8) return false;
+          if (cy - swH * 0.5 < 4 || cy + swH * 0.5 > 996) return false;
+          for (const o of obstacles) {
+            if (Math.abs(cx - o.x) < (swW + o.w) * 0.5 + 6 &&
+                Math.abs(cy - o.y) < (swH + o.h) * 0.5 + 4) {
+              return false;
+            }
+          }
+          return true;
+        };
+
+        const cands = [];
+        if (visBtn) {
+          cands.push([btn.x + btn.w * 0.5 + 10 + swW * 0.5, btnY]);
+        }
+        if (visHint) {
+          cands.push([hintS.x + hintS.w * 0.5 + 12 + swW * 0.5, hintS.y]);
+          cands.push([hintS.x - hintS.w * 0.5 + swW * 0.5, hintS.y + hintS.h * 0.5 + 8 + swH * 0.5]);
+        }
+        if (visTitle) {
+          cands.push([ctx.title.x + ctx.title.w * 0.5 + 12 + swW * 0.5, ctx.title.y]);
+        }
+
+        let sx = 0, sy = 0, placed = false;
+        for (const [cx, cy] of cands) {
+          if (fits(cx, cy)) { sx = cx; sy = cy; placed = true; break; }
+        }
+        if (!placed) {
+          if (visHint) {
+            sx = ctx.clamp(hintS.x - hintS.w * 0.5 + swW * 0.5, 8 + swW * 0.5, W - 8 - swW * 0.5);
+            sy = hintS.y + hintS.h * 0.5 + 8 + swH * 0.5;
+          } else {
+            sx = 24 + swW * 0.5;
+            sy = (ctx.topHudBottom ? ctx.topHudBottom() : 100) + 8 + swH * 0.5;
+          }
+        }
+
         if (!swatchSprite || !sprites.has(swatchSprite)) {
-          swatchSprite = spr(stex, { hud: true, z: 0.12, zr: 0.03, order: 215, x: sx, y: sy, w: 56, h: 40, own: false });
+          swatchSprite = spr(stex, { hud: true, z: 0.12, zr: 0.03, order: 215, x: sx, y: sy, w: swW, h: swH, own: false });
         } else {
           swatchSprite.tex = stex;
           swatchSprite.x = sx;

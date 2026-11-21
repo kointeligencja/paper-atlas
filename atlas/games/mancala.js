@@ -986,24 +986,6 @@
       K.snd.extra();
     }
 
-    function placeSwatch(sw) {
-      if (!sw) return;
-      const hintS = ctx.hint && ctx.hint();
-      const pBtn = ctx.playerBtn;
-      const ttl = ctx.title;
-      if (pBtn && pBtn.alpha === 0 && ttl && ttl.alpha > 0) {
-        sw.x = ttl.x + ttl.w / 2 + sw.w / 2 + 16;
-        sw.y = ttl.y;
-      }
-      if (hintS && hintS.alpha > 0) {
-        const dx = Math.abs(sw.x - hintS.x), dy = Math.abs(sw.y - hintS.y);
-        if (dx < (sw.w + hintS.w) * 0.5 + 6 && dy < (sw.h + hintS.h) * 0.5 + 4) {
-          sw.x = hintS.x + hintS.w / 2 + sw.w / 2 + 12;
-          sw.y = hintS.y;
-        }
-      }
-    }
-
     function syncTurnUI(hop, customHint) {
       const p = state.turn;
       const who = p === 1 ? p1Obj() : p2Obj();
@@ -1014,8 +996,8 @@
         else if (moves === 0) ctx.setHint(`${nameOf(p)}, pick one of your pits`);
         else ctx.setHint(`${nameOf(p)}, your turn`);
       }
-      const sw = K.turnDisplay(who, p === 1 ? 'p1' : 'p2', !!hop);
-      placeSwatch(sw);
+      if (host && host.onLayout) host.onLayout();
+      K.turnDisplay(who, p === 1 ? 'p1' : 'p2', !!hop);
     }
 
     function scheduleBotIfNeeded() {
@@ -1085,7 +1067,7 @@
         endConfetti = K.confetti(W / 2, endRibbon ? endRibbon.y : 470, 24, [K.COL.p1, K.COL.p2]);
         if (ctx.sfx && ctx.sfx.wake) ctx.sfx.wake();
         if (state.winner) {
-          placeSwatch(K.turnDisplay(state.winner === 1 ? p1Obj() : p2Obj(), state.winner === 1 ? 'p1' : 'p2', true));
+          K.turnDisplay(state.winner === 1 ? p1Obj() : p2Obj(), state.winner === 1 ? 'p1' : 'p2', true);
         }
         if (ctx.speakText) ctx.speakText(`${n1} ${s1}, ${n2} ${s2}. ${line2}`);
         if (host && host.onOver) host.onOver(state.winner);
@@ -1289,9 +1271,9 @@
       if (lastCamKey && key !== lastCamKey) moveCam(true);
       if (!state.over) {
         const p = state.turn;
-        placeSwatch(K.turnDisplay(p === 1 ? p1Obj() : p2Obj(), p === 1 ? 'p1' : 'p2', false));
+        K.turnDisplay(p === 1 ? p1Obj() : p2Obj(), p === 1 ? 'p1' : 'p2', false);
       } else if (state.winner) {
-        placeSwatch(K.turnDisplay(state.winner === 1 ? p1Obj() : p2Obj(), state.winner === 1 ? 'p1' : 'p2', false));
+        K.turnDisplay(state.winner === 1 ? p1Obj() : p2Obj(), state.winner === 1 ? 'p1' : 'p2', false);
       }
       layoutEndUI();
     }

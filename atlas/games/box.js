@@ -222,6 +222,12 @@
       storyState = null;
       setupState = null;
       leaveArmed = { id: null, until: 0 };
+      if (ctx.btn) {
+        for (const id of Object.keys(ctx.btn)) {
+          const b = ctx.btn[id];
+          if (b && b._savedRail) { b.rail = true; delete b._savedRail; }
+        }
+      }
     }
 
     // ---- Helper: rounded rect path & continent polygon drawer ----
@@ -1406,8 +1412,11 @@
     function visibleBarIds() {
       if (screen === 'play' || screen === 'over') {
         const ids = ['games', 'world', 'sound'];
+        if (screen === 'play' && activeGame && activeGame.hint) {
+          ids.unshift('hint');
+        }
         if (screen === 'play' && activeGame && activeGame.canUndo && activeGame.canUndo()) {
-          ids.splice(1, 0, 'undo');
+          ids.splice(ids.indexOf('games') + 1, 0, 'undo');
         }
         if (screen === 'play' && activeId === 'borders' && activeGame && activeGame.zoomable) {
           ids.push('zoomOut', 'zoomIn');
@@ -1423,13 +1432,17 @@
         return;
       }
       const hPx = ctx.hudPx();
-      const visBtns = ['games', 'world', 'sound', 'undo', 'zoomOut', 'zoomIn']
+      const visBtns = ['hint', 'games', 'world', 'sound', 'undo', 'zoomOut', 'zoomIn']
         .map(id => ({ id, s: ctx.btn[id] }))
         .filter(q => q.s && q.s.alpha > 0.5);
       const bh = ctx.pickHit(visBtns, p.hx, p.hy, 8, hPx, q => q.s);
       if (bh) {
         bh.s.lift = 0.15;
         K.tw(bh.s, { lift: 0 }, 0.3);
+        if (bh.id === 'hint') {
+          if (screen === 'play' && activeGame && activeGame.hint) activeGame.hint(bh.s);
+          return;
+        }
         if (bh.id === 'games') { press(); return; }
         if (bh.id === 'world') {
           if (screen === 'play' && !checkLeaveGuard('world', bh.s)) return;
@@ -1498,7 +1511,10 @@
 
       const showIds = visibleBarIds().filter(id => !!btn[id]);
       const rightIds = showIds.slice().reverse();
-      for (const id of showIds) btn[id].rot = btn[id].tilt + ctx.wobbleRot(btn[id]);
+      for (const id of showIds) {
+        if (btn[id].rail) { btn[id]._savedRail = true; btn[id].rail = false; }
+        btn[id].rot = btn[id].tilt + ctx.wobbleRot(btn[id]);
+      }
 
       if (asp < 0.9) {
         title.alpha = 1;

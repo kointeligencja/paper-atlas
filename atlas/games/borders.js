@@ -588,7 +588,6 @@
     let previewSpr = null;
     let previewId = null;
     let previewTag = null;
-    let hintBtn = null;
     let hintRing = null;
     let ribbonSpr = null;
     let againBtn = null;
@@ -625,6 +624,13 @@
       return [x0 - 12, y0 - 12, x1 + 12, y1 + 12];
     }
 
+    function mapInnerBounds() {
+      const wf = ctx.worldFrame ? ctx.worldFrame() : null;
+      const cx = (wf && typeof wf.x === 'number') ? wf.x : 1000;
+      // Inner sea edge inside the world map's black paper frame (~[-28, -28, 2025, 993])
+      return [cx - 1022, -22, cx + 1018, 988];
+    }
+
     function computeBaseCam() {
       const m = {
         l: 0.03,
@@ -633,6 +639,23 @@
         b: ctx.PHONE ? 0.06 : 0.04,
       };
       baseCam = ctx.fitCam(boardRegion, m, 0, false);
+      const mb = mapInnerBounds();
+      if (mb) {
+        const asp = ctx.asp();
+        const mw = mb[2] - mb[0], mh = mb[3] - mb[1];
+        const hw = baseCam.h * asp * 0.5;
+        const hh = baseCam.h * 0.5;
+        if (hw * 2 <= mw) {
+          baseCam.x = ctx.clamp(baseCam.x, mb[0] + hw, mb[2] - hw);
+        } else {
+          baseCam.x = (mb[0] + mb[2]) * 0.5;
+        }
+        if (hh * 2 <= mh) {
+          baseCam.y = ctx.clamp(baseCam.y, mb[1] + hh, mb[3] - hh);
+        } else {
+          baseCam.y = (mb[1] + mb[3]) * 0.5;
+        }
+      }
       const pxPerUnit = Math.max(1e-4, window.innerHeight / Math.max(1, baseCam.h));
       let minPx = 1e9;
       for (const id of board.ids) {
@@ -1067,9 +1090,11 @@
     function bakeBridges() {
       clearBridges();
       if (!board || !board.bridges || !board.bridges.length) return;
-      const ppu = Math.max(18, Math.min(48, baseScrPpu() * dprScale() * 2.2));
-      const wid = 2.4;
-      const pad = 0.8;
+      const ppuBase = Math.max(18, Math.min(48, baseScrPpu() * dprScale() * 2.2));
+      const camH = baseCam ? baseCam.h : 400;
+      const wid = Math.max(4.2, Math.min(5.6, camH * 0.007));
+      const overlap = Math.max(4.5, wid * 1.1);
+      const pad = Math.max(1.4, wid * 0.35);
       for (const [idA, idB] of board.bridges) {
         const cA = ctx.C[idA], cB = ctx.C[idB];
         if (!cA || !cB) continue;
@@ -1078,38 +1103,51 @@
         const my = (ay + by) * 0.5;
         const dist = Math.hypot(bx - ax, by - ay);
         const ang = Math.atan2(by - ay, bx - ax);
-        const len = Math.max(7, dist);
+        const len = Math.max(11, dist + overlap * 2);
+        const ppu = Math.min(ppuBase, 1024 / (len + pad * 2));
         const b = B.bake((len + pad * 2) * ppu, (wid + pad * 2) * ppu);
         b.s = ppu;
         const x0 = pad * ppu, y0 = pad * ppu;
         const x1 = (pad + len) * ppu, y1 = (pad + wid) * ppu;
         const seed = ctx.sid(idA + '-' + idB) + 17;
         const edge = ctx.cutEdge(x0, y0, x1, y1, 0.35 * ppu, seed);
-        B.paper(b, edge, ctx.PAP[0], 0.6);
+        B.paper(b, edge, '#f6eedc', 0.65);
 
-        // Three dark cross-lines like planks
+        // Dark plank cross-lines clipped inside the bridge
         b.c.save(); b.g.save();
         b.c.beginPath(); edge(b.c); b.c.clip();
         b.g.beginPath(); edge(b.g); b.g.clip();
-        const lw = Math.max(1.5, 0.34 * ppu);
-        for (const u of [0.25, 0.5, 0.75]) {
+        const nPlanks = Math.max(3, Math.min(10, Math.round(len / (wid * 0.9))));
+        const lw = Math.max(1.6, wid * 0.14 * ppu);
+        for (let i = 1; i <= nPlanks; i++) {
+          const u = i / (nPlanks + 1);
           const px = x0 + (x1 - x0) * u;
-          b.c.strokeStyle = 'rgba(42,38,34,0.78)';
+          b.c.strokeStyle = 'rgba(34,34,41,0.88)';
           b.c.lineWidth = lw;
           b.c.lineCap = 'round';
           b.c.beginPath();
-          b.c.moveTo(px, y0 + 0.15 * ppu);
-          b.c.lineTo(px, y1 - 0.15 * ppu);
+          b.c.moveTo(px, y0 + 0.12 * ppu);
+          b.c.lineTo(px, y1 - 0.12 * ppu);
           b.c.stroke();
 
           b.g.strokeStyle = B.grey(0.32);
           b.g.lineWidth = lw;
           b.g.beginPath();
-          b.g.moveTo(px, y0 + 0.15 * ppu);
-          b.g.lineTo(px, y1 - 0.15 * ppu);
+          b.g.moveTo(px, y0 + 0.12 * ppu);
+          b.g.lineTo(px, y1 - 0.12 * ppu);
           b.g.stroke();
         }
         b.c.restore(); b.g.restore();
+
+        // Dark ink outline around the bridge perimeter so it reads clearly over sea and pale land
+        b.c.save();
+        b.c.strokeStyle = '#222229';
+        b.c.lineWidth = Math.max(2.0, wid * 0.16 * ppu);
+        b.c.lineJoin = 'round';
+        b.c.beginPath();
+        edge(b.c);
+        b.c.stroke();
+        b.c.restore();
 
         const s = K.spr(B.tex(b), {
           x: mx,
@@ -1117,9 +1155,9 @@
           w: b.w / ppu,
           h: b.h / ppu,
           rot: ang,
-          z: 0.22,
-          zr: 0.04,
-          order: 32,
+          z: 0.27,
+          zr: 0.05,
+          order: 41,
           own: true,
         });
         bridgeSprs.push(s);
@@ -1302,23 +1340,12 @@
       ctx.speakText(msg);
     }
 
-    function ensureHintBtn() {
-      if (hintBtn) { K.kill(hintBtn); hintBtn = null; }
-      hintBtn = K.tab('Hint', false, {
-        colr: ctx.PAP[5],
-        ink: ctx.INK,
-        order: 215,
-        seed: 707,
-      });
-      hintBtn.baseTilt = -0.025;
-      hintBtn.rot = hintBtn.baseTilt;
-    }
-
-    function triggerHint() {
+    function triggerHint(btnSprite) {
       if (!state || state.over || isBusy() || isBotTurn()) return;
       const leg = L.legal(state, G);
       if (!leg.length) {
-        if (hintBtn) ctx.startWobble(hintBtn);
+        const b = btnSprite || (ctx.btn && ctx.btn.hint);
+        if (b) ctx.startWobble(b);
         return;
       }
       let bestId = leg[0];
@@ -1476,7 +1503,6 @@
     function afterMovePlaced() {
       if (!state || destroyed) return;
       if (state.over) {
-        if (hintBtn) hintBtn.alpha = 0;
         clearHintRing();
         if (host && host.onOver) host.onOver(state.winner);
         const myGen = gen;
@@ -1694,7 +1720,6 @@
       computeBaseCam();
       bakeBoardSheet();
       bakeBridges();
-      ensureHintBtn();
 
       const immediate = !!(meta && meta.immediate) || K.isFast();
       if (immediate) {
@@ -1740,14 +1765,6 @@
           host.openBox();
           return;
         }
-        return;
-      }
-
-      const hPx = ctx.hudPx();
-      if (hintBtn && hintBtn.alpha > 0.5 && ctx.hitMin(hintBtn, p.hx, p.hy, 8, hPx)) {
-        hintBtn.lift = 0.14;
-        K.tw(hintBtn, { lift: 0 }, 0.25);
-        triggerHint();
         return;
       }
 
@@ -1899,9 +1916,6 @@
         const s = pieceSprs[id];
         if (s && s.wob !== undefined) s.rot = ctx.wobbleRot(s);
       }
-      if (hintBtn && hintBtn.wob !== undefined) {
-        hintBtn.rot = (hintBtn.baseTilt || 0) + ctx.wobbleRot(hintBtn);
-      }
       if (againBtn && againBtn.wob !== undefined) {
         againBtn.rot = (againBtn.baseTilt || 0) + ctx.wobbleRot(againBtn);
       }
@@ -1912,40 +1926,7 @@
 
     function layoutHud() {
       if (!state || destroyed) return;
-      const sw = updateTurnDisplay(false);
-      const W = 1000 * ctx.asp();
-      const hintS = ctx.hint && ctx.hint();
-      if (sw && hintS && hintS.alpha > 0.5) {
-        const hitHint = Math.abs(sw.y - hintS.y) < (sw.h + hintS.h) * 0.52 &&
-                        Math.abs(sw.x - hintS.x) < (sw.w + hintS.w) * 0.52;
-        if (hitHint) {
-          let rightLimit = W - 20;
-          for (const id of ['games', 'undo', 'world', 'sound', 'zoomOut', 'zoomIn']) {
-            const b = ctx.btn && ctx.btn[id];
-            if (b && b.alpha > 0.5 && Math.abs(b.y - hintS.y) < (b.h + sw.h) * 0.55) {
-              rightLimit = Math.min(rightLimit, b.x - b.w * 0.5 - 10);
-            }
-          }
-          const candX = hintS.x + hintS.w * 0.5 + 12 + sw.w * 0.5;
-          if (candX + sw.w * 0.5 <= rightLimit) {
-            sw.x = candX;
-            sw.y = hintS.y;
-          } else {
-            sw.x = hintS.x - hintS.w * 0.5 + sw.w * 0.5;
-            sw.y = hintS.y + hintS.h * 0.5 + 8 + sw.h * 0.5;
-          }
-        }
-      }
-      if (hintBtn) {
-        if (state.over) {
-          hintBtn.alpha = 0;
-        } else {
-          hintBtn.alpha = 1;
-          const pad = ctx.PHONE ? 16 : 24;
-          hintBtn.x = W - pad - hintBtn.w * 0.5;
-          hintBtn.y = 1000 - pad - hintBtn.h * 0.5;
-        }
-      }
+      updateTurnDisplay(false);
       if (state.over) layoutEndUi();
     }
 
@@ -1972,7 +1953,6 @@
       rebuildPiecesFromState();
       for (const k of Object.keys(markSprs)) { K.kill(markSprs[k]); delete markSprs[k]; delete markKinds[k]; }
       syncMarks(false);
-      ensureHintBtn();
       if (state.over && ribbonSpr) {
         bakeEndSprites();
       }
@@ -1992,7 +1972,6 @@
       clearEndUi();
       clearBridges();
       if (sheetSpr) { K.kill(sheetSpr); sheetSpr = null; }
-      if (hintBtn) { K.kill(hintBtn); hintBtn = null; }
       for (const k of Object.keys(pieceSprs)) { K.kill(pieceSprs[k]); delete pieceSprs[k]; }
       for (const k of Object.keys(markSprs)) { K.kill(markSprs[k]); delete markSprs[k]; delete markKinds[k]; }
       K.turnDisplay(ctx.currentPlayer(), null, false);
@@ -2059,6 +2038,7 @@
       rebake,
       undo,
       canUndo,
+      hint: triggerHint,
       zoom,
       get zoomable() { return canZoom; },
       destroy,

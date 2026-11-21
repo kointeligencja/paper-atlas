@@ -700,10 +700,10 @@
       const tp = trayPos(side);
       if (isPortrait()) {
         const col = idx % 8, row = (idx / 8) | 0;
-        return [tp[0] - 96 + col * 36, tp[1] + (row - 1.5) * 30];
+        return [tp[0] - 90 + col * 36, tp[1] + (row - 1.5) * 29];
       }
       const col = idx % 4, row = (idx / 4) | 0;
-      return [tp[0] + (col - 1.5) * 32, tp[1] - 94 + row * 36];
+      return [tp[0] + (col - 1.5) * 29, tp[1] - 100 + row * 36];
     }
 
     function clearTrays() {
@@ -748,7 +748,7 @@
       if (!st) return;
       const cnt = logic.count(st);
       const counts = { 1: cnt.x, 2: cnt.o };
-      const miniSz = 35.6; // radius 16 at 0.90 fill
+      const miniSz = 28; // radius ~12.6 at 0.90 fill — fits 4x8 / 8x4 cleanly inside tray
       for (const s of [1, 2]) {
         if (badgeSpr[s]) badgeSpr[s].tex = K.badge(counts[s]);
         const want = Math.min(32, Math.ceil(counts[s] / 2));
@@ -1073,26 +1073,8 @@
       if (!isBotSide(stateSnap.turn)) humanUndoCount++;
     }
 
-    function ensureFullMat() {
-      const m = K.ensureMat();
-      // Portrait 820x1180 shifts camera upward; stretch mat vertically so no tan table peeks at top
-      if (m && m.h < 2800) m.h = 2800;
-      return m;
-    }
-
     function showTurnDisplay(side, hop) {
-      const sw = K.turnDisplay(whoOfSide(side), side === 1 ? 'navy' : 'cream', !!hop);
-      if (!sw) return;
-      const btn = ctx.playerBtn;
-      const btnHidden = !btn || btn.alpha < 0.1;
-      const h = ctx.hint && ctx.hint();
-      const overlapsHint = h && h.alpha > 0.1 &&
-        Math.abs(sw.x - h.x) < (sw.w + h.w) * 0.5 + 8 &&
-        Math.abs(sw.y - h.y) < (sw.h + h.h) * 0.5 + 8;
-      if ((btnHidden || overlapsHint) && h && h.alpha > 0.1) {
-        sw.x = h.x + h.w / 2 + sw.w / 2 + 16;
-        sw.y = h.y;
-      }
+      K.turnDisplay(whoOfSide(side), side === 1 ? 'navy' : 'cream', !!hop);
     }
 
     function enterTurn(hop) {
@@ -1208,7 +1190,7 @@
       busyFlag = false;
       hist.clear();
       humanUndoCount = 0;
-      ensureFullMat();
+      K.ensureMat();
       ensureDiscTextures();
       ensureDotTex();
       buildBoard();
@@ -1260,7 +1242,7 @@
     }
     function layoutHud() {
       if (!st || destroyed) return;
-      ensureFullMat();
+      K.ensureMat();
       const pNow = isPortrait();
       if (pNow !== lastPortrait) buildTrays();
       frameCamera(true);
@@ -1272,7 +1254,7 @@
     }
     function rebake() {
       if (!st || destroyed) return;
-      ensureFullMat();
+      K.ensureMat();
       ensureDiscTextures();
       ensureDotTex();
       buildBoard();
