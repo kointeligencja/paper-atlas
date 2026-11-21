@@ -322,9 +322,14 @@
     const OX = BOARD_W / 2, OY = BOARD_H / 2;
 
     let page = null;
+    let pageKey = '';
+    let tree = null, elephant = null, tufts = [], moverTexs = [];
+    let elephantTexs = [], elephantK = 1, elephantSpan = 1500, elephantY = 0, elephantX0 = 0, elephantStart = 0;
+    let gf = 0, gfAcc = 0, fq = [];     // the 12 fps game clock (frames) and the things waiting on it
     let sceneSprs = [];
     let boardSpr = null;
     let ringTex = null;
+    let storeRingTex = null;
     let ringSprs = [];
     let turnTab = null;
     let badges = new Array(14).fill(null);
@@ -413,43 +418,139 @@
     function clearScene() {
       for (const s of sceneSprs) K.kill(s);
       sceneSprs.length = 0;
+      tree = null; elephant = null; tufts = [];
+      for (const t of moverTexs) if (t) B.freeTex(t);
+      moverTexs.length = 0;
       if (page) { page.destroy(); page = null; }
+    }
+
+    const ellP = (x, y, rx, ry, rot) => q => q.ellipse(x, y, rx, ry, rot || 0, 0, Math.PI * 2);
+    const polyP = pts => q => {
+      q.moveTo(pts[0], pts[1]);
+      for (let i = 2; i < pts.length; i += 2) q.lineTo(pts[i], pts[i + 1]);
+      q.closePath();
+    };
+
+    // The page of the game: the landscape page is 1320x660; in portrait it gets narrower and taller so that the
+    // camera (which fits the page to the width) fills the screen height with scene instead of empty table.
+    const LAND_W = 1320, LAND_H = 660, PAGE_BOT = GY - 88 + LAND_H / 2;
+    function pageSpec() {
+      const asp = ctx.asp();
+      if (asp >= 1.25) return { w: LAND_W, h: LAND_H, key: 'L' };
+      const t = ctx.clamp((asp - 0.7) / 0.55, 0, 1);
+      const w = Math.round(1104 + (LAND_W - 1104) * t);
+      const topB = ctx.topHudBottom();
+      const mt = Math.min(0.32, (topB + (ctx.PHONE ? 6 : 10)) / 1000);
+      const mb = ctx.PHONE ? 0.015 : 0.042, mlr = ctx.PHONE ? 0.02 : 0.064;
+      const bw = 52;
+      const fill = (1 - mt - mb) / (1 - mlr) * (w + 2 * bw) / asp - 2 * bw;
+      const h = Math.round(ctx.clamp(fill * 0.97, LAND_H, 1500));
+      return { w, h, key: `${w}x${h}` };
+    }
+
+    function bakeElephant(leg) {
+      const W = 120, H = 90, S = 3, c = '#4a2456';
+      return ctx.shapeTex(W * S, H * S, b => {
+        b.s = S;
+        for (const g of [b.c, b.g]) g.setTransform(S, 0, 0, S, W * S / 2, H * S / 2);
+        strokePaper(b, q => {
+          q.moveTo(-22 - leg * 3, 10); q.lineTo(-22 - leg * 5, 34);
+          q.moveTo(-8 + leg * 3, 12); q.lineTo(-8 + leg * 5, 34);
+          q.moveTo(14 - leg * 3, 12); q.lineTo(14 - leg * 5, 34);
+          q.moveTo(26 + leg * 3, 10); q.lineTo(26 + leg * 5, 34);
+        }, c, 0.5, 9);
+        B.paper(b, ellP(0, 0, 36, 22), c, 0.5);
+        B.paper(b, ellP(-32, -6, 18, 18), c, 0.5);
+        strokePaper(b, q => { q.moveTo(-45, -2); q.quadraticCurveTo(-54, 16, -48, 30); }, c, 0.5, 7);
+        B.paper(b, ellP(-22, -8, 11, 15, -0.2), '#5a2c66', 0.6);
+        strokePaper(b, q => { q.moveTo(34, -4); q.quadraticCurveTo(42, 4, 40, 14); }, c, 0.5, 2.5);
+      }, { noMip: true });
+    }
+
+    function bakeTree() {
+      const W = 300, H = 220, S = 2, c = '#4a2456';
+      return ctx.shapeTex(W * S, H * S, b => {
+        b.s = S;
+        for (const g of [b.c, b.g]) g.setTransform(S, 0, 0, S, W * S / 2, H * S / 2);
+        strokePaper(b, q => {
+          q.moveTo(8, 104); q.quadraticCurveTo(0, 50, -34, -26);
+          q.moveTo(2, 50); q.quadraticCurveTo(24, 10, 66, -30);
+          q.moveTo(-14, 16); q.lineTo(-84, -18);
+        }, c, 0.5, 10);
+        B.paper(b, ellP(-30, -50, 108, 21), '#2c7a5e', 0.7);
+        B.paper(b, ellP(58, -46, 70, 16), '#3c9270', 0.8);
+        B.paper(b, ellP(-92, -30, 42, 11), '#3c9270', 0.75);
+      }, { noMip: true });
+    }
+
+    function bakeTuft() {
+      const W = 70, H = 60, S = 3;
+      return ctx.shapeTex(W * S, H * S, b => {
+        b.s = S;
+        for (const g of [b.c, b.g]) g.setTransform(S, 0, 0, S, W * S / 2, H * S / 2);
+        for (const [dx, h, a] of [[-18, 26, -0.5], [-8, 40, -0.15], [4, 46, 0.1], [14, 34, 0.4], [24, 22, 0.7]]) {
+          B.paper(b, polyP([dx - 5, 26, dx + 5, 26, dx + Math.sin(a) * h, 26 - h]), (dx + 18) % 4 ? '#dba336' : '#f6d57c', 0.5);
+        }
+      }, { noMip: true });
     }
 
     function ensureScene() {
       K.hideMat();
-      if (page) return;
-      page = K.gamePage({ cx: GX, cy: GY - 88, w: 1320, h: 660, frameOrder: 6, tableOrder: -20 });
+      const spec = pageSpec();
+      if (page && pageKey === spec.key) return;
+      if (page) clearScene();
+      pageKey = spec.key;
+      // extra height (portrait) goes to the sky above all, then some ground above and below the board
+      const extra = spec.h - LAND_H, gt = extra * 0.3, gb = extra * 0.2;
+      page = K.gamePage({ cx: GX, cy: PAGE_BOT + gb - spec.h / 2, w: spec.w, h: spec.h, frameOrder: 6, tableOrder: -20 });
       const IN = page.in;
-      const sx = IN.w / 1434, sy = IN.h / 709;
-      const pyMap = py => IN.y0 + (py + 284) * sy;
+      const sx = IN.w / 1434, sg = LAND_H / 709;
+      const hor = GY - 243 - gt;                // the foot of the far hill (py -96 of the mockup)
+      const kk = (hor - IN.y0) / (188 * sg);    // the sky stretches, the ground keeps its size
+      const pyMap = py => hor + (py + 96) * sg; // ground and hills, relative to the horizon
+      const bandTop = py => hor - (-96 - py) * sg * kk;
       const R = ctx.rng(7);
 
       const SKY = ['#d9607c', '#e87862', '#f09a50', '#f7c45c'];
       const topH = pyMap(-90) - (IN.y0 - 8);
       page.flat(SKY[0], { x: IN.cx, y: IN.y0 - 8 + topH * 0.5, w: IN.w + 28, h: topH, z: 0.04, zr: 0, order: -10 });
-      page.strata(SKY[1], pyMap(-236), pyMap(-90), 7 * sy, 1.0, 0.07, -9);
-      page.strata(SKY[2], pyMap(-196), pyMap(-90), 6 * sy, 3.4, 0.10, -8);
-      page.strata(SKY[3], pyMap(-160), pyMap(-90), 5 * sy, 5.2, 0.13, -7);
+      page.strata(SKY[1], bandTop(-236), pyMap(-90), 7 * sg, 1.0, 0.07, -9);
+      page.strata(SKY[2], bandTop(-196), pyMap(-90), 6 * sg, 3.4, 0.10, -8);
+      page.strata(SKY[3], bandTop(-160), pyMap(-90), 5 * sg, 5.2, 0.13, -7);
 
-      const sunR = 62 * sy, sunSz = 144, sunS = 2;
+      const sunR = 62 * sg, sunSz = 144, sunS = 2;
       const sunTex = ctx.shapeTex(sunSz * sunS, sunSz * sunS, b => {
         b.s = sunS;
         const c = sunSz * sunS * 0.5;
         B.paper(b, q => q.arc(c, c, sunR * sunS, 0, Math.PI * 2), '#ffe9a6', 0.6);
       }, { noMip: true });
       sceneSprs.push(K.spr(sunTex, {
-        x: IN.cx - 360 * sx, y: pyMap(-138), w: sunSz, h: sunSz,
+        x: IN.cx - 360 * sx, y: hor - 42 * sg, w: sunSz, h: sunSz,
         z: 0.15, zr: 0.03, order: -6, own: true,
       }));
 
-      page.strata('#a8527f', pyMap(-142), pyMap(-80), 16 * sy, 0.4, 0.20, -5);
-      page.strata('#743a70', pyMap(-118), pyMap(-80), 12 * sy, 2.3, 0.26, -3);
-      page.strata('#ecb94c', pyMap(-96), IN.y1 + 6, 7 * sy, 1.0, 0.30, -2, (b, cy) => {
+      page.strata('#a8527f', pyMap(-142), pyMap(-80), 16 * sg, 0.4, 0.20, -5);
+      page.strata('#743a70', pyMap(-118), pyMap(-80), 12 * sg, 2.3, 0.26, -3);
+
+      // the far hill: one elephant, walking (it is moved in ambient())
+      elephantTexs = [bakeElephant(1), bakeElephant(-1)];
+      moverTexs.push(elephantTexs[0], elephantTexs[1]);
+      elephantK = 0.62 * sg;
+      elephantSpan = IN.w + 160;
+      elephantY = hor - 50 * sg;
+      elephant = K.spr(elephantTexs[0], {
+        x: IN.cx - 40 * sx, y: elephantY, w: 120 * elephantK, h: 90 * elephantK, sx: -1,
+        z: 0.30, zr: 0.03, order: -4, own: true,
+      });
+      sceneSprs.push(elephant);
+      elephantX0 = IN.x0 - 80;
+      elephantStart = (IN.cx - 40 * sx) - elephantX0;
+
+      page.strata('#ecb94c', pyMap(-96), IN.y1 + 6, 7 * sg, 1.0, 0.30, -2, (b, cy) => {
         for (let i = 0; i < 26; i++) {
           const x = -IN.w * 0.5 + 30 * sx + R() * (IN.w - 60 * sx);
           const y = pyMap(-78 + R() * 26) - cy;
-          const s = (5 + R() * 5) * sy;
+          const s = (5 + R() * 5) * sg;
           strokePaper(b, q => {
             q.moveTo(x - s * 0.5, y); q.lineTo(x - s * 0.9, y - s);
             q.moveTo(x, y); q.lineTo(x, y - s * 1.4);
@@ -457,6 +558,44 @@
           }, R() < 0.5 ? '#d39a30' : '#f6d57c', 0.58, 1.9);
         }
       });
+
+      // one umbrella thorn on the right, its foot on the horizon
+      const treeTex = bakeTree();
+      moverTexs.push(treeTex);
+      const tk = 0.86 * sg;
+      tree = K.spr(treeTex, {
+        x: IN.cx + 500 * sx, y: hor - 80 * sg, w: 300 * tk, h: 220 * tk,
+        z: 0.5, zr: 0.06, order: -1, own: true,
+      });
+      sceneSprs.push(tree);
+
+      // grass in the two bottom corners
+      const tuftTex = bakeTuft();
+      moverTexs.push(tuftTex);
+      tufts = [[-676, 400, 1], [-626, 408, 0.7], [-560, 404, 0.8], [668, 400, 1], [606, 408, 0.7]].map(([x, y, s], i) => {
+        const t = K.spr(tuftTex, {
+          x: IN.cx + x * sx, y: IN.y1 - (425 - y) * sg, w: 70 * s * sg, h: 60 * s * sg,
+          z: 0.34, zr: 0.03, order: 3, own: true,
+        });
+        t.ph = i;
+        sceneSprs.push(t);
+        return t;
+      });
+      ambient();
+    }
+
+    // the three movers of the scene, at 12 fps: the elephant walks 1 unit every 4 frames and swaps legs every 8,
+    // the thorn's canopy sways 0.01 rad, the corner grass 0.06 rad. Nothing else moves.
+    function ambient() {
+      if (!page) return;
+      if (elephant) {
+        const f = gf;
+        elephant.tex = elephantTexs[(f >> 3) & 1];
+        elephant.x = elephantX0 + ((elephantStart + Math.floor(f / 4)) % elephantSpan);
+        elephant.y = elephantY + ((f >> 3) & 1);
+      }
+      if (tree) tree.rot = Math.sin(gf * 0.1) * 0.01;
+      for (const t of tufts) t.rot = Math.sin(gf * 0.12 + t.ph) * 0.06;
     }
 
     function bakeBoardTex() {
@@ -517,6 +656,14 @@
       return ctx.shapeTex(sz * S, sz * S, b => {
         b.s = S;
         strokePaper(b, q => q.arc(c, c, 57 * S, 0, Math.PI * 2), '#fbf3dc', 0.80, 4.5 * S);
+      }, { noMip: true });
+    }
+
+    function bakeStoreRingTex() {
+      const W = 128, H = 328, S = 2;
+      return ctx.shapeTex(W * S, H * S, b => {
+        b.s = S;
+        strokePaper(b, q => roundRectPath(q, 8 * S, 8 * S, 112 * S, 312 * S, 56 * S), '#fbf3dc', 0.80, 4.5 * S);
       }, { noMip: true });
     }
 
@@ -585,7 +732,7 @@
     }
 
     const BEAN_COLS = ['#f6ecd2', '#f4c443', '#e5604d', '#1f8f84'];
-    const SEED_TEX_W = 34, SEED_TEX_H = 34, SEED_S = 3;
+    const SEED_TEX_W = 44, SEED_TEX_H = 44, SEED_S = 3, BEAD_R = 17;
     const FLOOR = 0.99;
     let beanTexs = null;
     let shellTex = null;
@@ -597,14 +744,14 @@
       beanTexs = BEAN_COLS.map(col => ctx.shapeTex(W, H, b => {
         b.s = SEED_S;
         for (const g of [b.c, b.g]) g.setTransform(SEED_S, 0, 0, SEED_S, W * 0.5, H * 0.5);
-        domePaper(b, 0, 0, 14.5, col, 0.3, 1);
-        B.paper(b, q => q.ellipse(-4.6, -5.3, 3.5, 2.3, -0.7, 0, Math.PI * 2), '#fffaf0', 1);
+        domePaper(b, 0, 0, BEAD_R, col, 0.3, 1);
+        B.paper(b, q => q.ellipse(-5.4, -6.2, 4.1, 2.7, -0.7, 0, Math.PI * 2), '#fffaf0', 1);
       }, { noMip: true }));
 
       shellTex = ctx.shapeTex(W, H, b => {
         b.s = SEED_S;
         const cx = W * 0.5, cy = H * 0.5;
-        const rx = 13 * SEED_S, ry = 9.5 * SEED_S;
+        const rx = 17 * SEED_S, ry = 12.5 * SEED_S;
         B.paper(b, q => q.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2), '#efe6d2', 0.85);
         B.paper(b, q => {
           q.moveTo(cx - rx * 0.68, cy);
@@ -636,21 +783,22 @@
       if (pit === 6 || pit === 13) {
         const layer = Math.floor(n / 14);
         const k = n % 14;
-        const ox = (k % 2 ? 12 : -12) + (ctx.hs(pit, n, 1) - 0.5) * 10;
-        const oy = -100 + (k >> 1) * 32 + (k % 2) * 14 + (ctx.hs(pit, n, 2) - 0.5) * 10;
+        const ox = (k % 2 ? 13 : -13) + (ctx.hs(pit, n, 1) - 0.5) * 8;
+        const oy = -104 + (k >> 1) * 33 + (k % 2) * 15 + (ctx.hs(pit, n, 2) - 0.5) * 8;
         const z = FLOOR + Math.min(layer, 3) * 0.03 + (k % 7) * 0.004;
         const order = 12 + layer * 16 + k * 0.25;
         return { x: cx + ox, y: cy + oy, z, order };
       }
 
+      // domed beads, spread like the mockup's: a loose spiral that fills the pit, a second layer on top
       const layer = n < 7 ? 0 : n < 16 ? 1 : 2;
       const m = layer === 0 ? n : (n - 7) % 9;
-      const a = m * 2.4 + pit * 0.73 + layer * 0.45 + (ctx.hs(pit, n, 3) - 0.5) * 0.4;
-      const d = Math.min(28, (m === 0 && layer === 0 ? 7 : 10) + Math.sqrt(m) * 8.6);
-      let fx = Math.cos(a) * d + (ctx.hs(pit, n, 1) - 0.5) * 5;
-      let fy = Math.sin(a) * d * 0.94 + (ctx.hs(pit, n, 2) - 0.5) * 5;
+      const a = m * 2.4 + pit * 0.73 + layer * 0.45 + (ctx.hs(pit, n, 3) - 0.5) * 0.3;
+      const d = Math.min(30, (m === 0 && layer === 0 ? 4 : 12) + Math.sqrt(m) * 12.5);
+      let fx = Math.cos(a) * d + (ctx.hs(pit, n, 1) - 0.5) * 3;
+      let fy = Math.sin(a) * d * 0.94 + (ctx.hs(pit, n, 2) - 0.5) * 3;
       const dist = Math.hypot(fx, fy);
-      if (dist > 29) { fx = fx / dist * 29; fy = fy / dist * 29; }
+      if (dist > 31) { fx = fx / dist * 31; fy = fy / dist * 31; }
       const z = FLOOR + Math.min(n, 10) * 0.012;
       const order = 12 + Math.min(n, 24) * 0.5;
       return { x: cx + fx, y: cy + fy, z, order };
@@ -688,7 +836,8 @@
       for (let slot = 0; slot < arr.length; slot++) {
         const sd = arr[slot];
         const pos = slotPos(p, slot);
-        ctx.killTw(sd.spr, ['x', 'y', 'z', 'lift', 'rot']);
+        ctx.killTw(sd.spr, ['x', 'y', 'z', 'lift', 'rot', 'sc']);
+        sd.spr.sc = 1;
         sd.spr.x = pos.x;
         sd.spr.y = pos.y;
         sd.spr.z = pos.z;
@@ -820,14 +969,6 @@
       });
     }
 
-    function bunchPos(hollow, idx, total) {
-      const [cx, cy] = pitCenter(hollow);
-      if (total <= 1) return [cx, cy];
-      const a = (idx / Math.min(total, 8)) * Math.PI * 2 + idx * 0.4;
-      const r = Math.min(14, 5 + Math.floor(idx / 8) * 5);
-      return [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
-    }
-
     function applyMoveInstant(pit, res, mover) {
       // Transfer seed objects faithfully through sow -> capture -> sweep
       const hand = pitSeeds[pit].slice();
@@ -868,126 +1009,228 @@
       popTabs.length = 0;
     }
 
-    function popBoardTab(label, x, y, colr, inkCol, rot) {
-      const s = K.worldTab(label, x, y, {
-        px: 28,
-        scale: 2,
-        colr,
-        ink: inkCol,
-        rot: rot || 0,
-        z: 1.55,
-        order: 130,
-        lift: 0.35,
-      });
-      popTabs.push(s);
-      K.tw(s, { lift: 0 }, 2 / 12, { cut: true });
-      const gen = runGen;
-      if (!K.isFast()) {
-        K.after(1.2, () => {
-          if (!alive) return;
-          const idx = popTabs.indexOf(s);
-          if (idx >= 0) popTabs.splice(idx, 1);
-          if (!K.sprites.has(s)) return;
-          K.tw(s, { lift: 0.35, alpha: 0 }, 2 / 12, {
-            cut: true,
-            done: () => K.kill(s),
-          });
-          void gen;
-        });
+    // ---- the 12 fps clock: every beat of a move is counted in frames ----
+    function later(frames, gen, fn) { fq.push({ at: gf + Math.max(0, frames), gen, fn }); }
+
+    function tickFrames(dt) {
+      gfAcc += dt * 12;
+      if (gfAcc > 4) gfAcc = 4;
+      while (gfAcc >= 1) {
+        gfAcc -= 1;
+        gf++;
+        ambient();
+        for (let pass = 0; pass < 60; pass++) {
+          const due = fq.filter(e => e.at <= gf);
+          if (!due.length) break;
+          fq = fq.filter(e => e.at > gf);
+          for (const e of due) if (alive && e.gen === runGen) e.fn();
+        }
       }
+    }
+
+    function seedsWord(n) { return n === 1 ? '1 seed' : `${n} seeds`; }
+
+    // a soft wooden "tok"; each one a little higher than the last
+    function tok(i) {
+      const f = Math.min(1000, 300 + 38 * (i || 0));
+      ctx.tone(f, 0.07, 'triangle', 0.20, f * 0.78);
+      ctx.noise(0.025, 1400, 0.15);
+    }
+
+    // where the beads of a group in the air sit round its centre
+    function flightOff(i, n) {
+      if (n <= 1) return [0, 0];
+      const r = Math.min(24, 11 + n * 3);
+      if (i < 8) {
+        const a = (i / Math.min(n, 8)) * Math.PI * 2 + 0.6;
+        return [Math.cos(a) * r, Math.sin(a) * r * 0.85];
+      }
+      const a = i * 2.4;
+      return [Math.cos(a) * r * 0.45, Math.sin(a) * r * 0.4];
+    }
+
+    function nearRot(from, to) {
+      const T = Math.PI * 2;
+      return to + T * Math.round((from - to) / T);
+    }
+
+    function addMoveRing(pit) {
+      if (!ringTex) ringTex = bakeRingTex();
+      if (!storeRingTex) storeRingTex = bakeStoreRingTex();
+      const [x, y] = pitCenter(pit);
+      const store = pit === 6 || pit === 13;
+      const s = K.spr(store ? storeRingTex : ringTex, {
+        x, y, w: store ? 128 : 132, h: store ? 328 : 132,
+        z: 1.42, zr: 0.03, order: 60, own: false,
+      });
+      ringSprs.push(s);
       return s;
     }
 
-    function hopSeedTo(sd, fromPit, toHollow, k, gen, done) {
-      setBadge(fromPit, Math.max(0, dispCounts[fromPit] - 1));
-      const slot = pitSeeds[toHollow].length;
-      pitSeeds[toHollow].push(sd);
-      const pos = slotPos(toHollow, slot);
-      const midX = (sd.spr.x + pos.x) * 0.5;
-      const midY = (sd.spr.y + pos.y) * 0.5;
-      sd.spr.order = 95 + (k % 30);
-      K.snd.clack(k);
-      K.tw(sd.spr, { x: midX, y: midY, lift: 0.6 }, 1 / 12, {
-        cut: true,
-        done() {
-          if (!alive || runGen !== gen) return;
-          K.tw(sd.spr, { x: pos.x, y: pos.y, z: pos.z, lift: 0 }, 2 / 12, {
-            cut: true,
-            done() {
-              if (!alive || runGen !== gen) return;
-              sd.spr.order = pos.order;
-              setBadge(toHollow, dispCounts[toHollow] + 1);
-              if (done) done();
-            },
-          });
-        },
+    // The sowing. Pick up 2 frames; hop to the next pit 4 frames on a 50-unit arc, the beads turning;
+    // one bead settles per pit (2 frames, 1.16 -> 1.0) with a "tok" a little higher each time.
+    function runSow(pit, res, mover, gen) {
+      const drops = res.steps.filter(st => st.to !== undefined);
+      const hand = pitSeeds[pit].slice();
+      pitSeeds[pit].length = 0;
+      setBadge(pit, 0);
+      const total = hand.length;
+      const lastTo = drops.length ? drops[drops.length - 1].to : pit;
+      const ring = addMoveRing(lastTo);
+      ctx.setHint(`${nameOf(mover)} sows ${seedsWord(total)}`);
+      const hopF = drops.length > 12 ? 2 : 4;
+
+      const [pcx, pcy] = pitCenter(pit);
+      const offs = hand.map((_, i) => flightOff(i, total));
+      hand.forEach((sd, i) => {
+        ctx.killTw(sd.spr, ['x', 'y', 'z', 'lift', 'sc', 'rot']);
+        sd.spr.order = 90 + i;
+        sd.spr.x += (pcx + offs[i][0] - sd.spr.x) * 0.5;
+        sd.spr.y += (pcy + offs[i][1] - sd.spr.y) * 0.5;
+        sd.spr.sc = 1.075;
+        sd.spr.lift = 0.35;
       });
+      later(1, gen, () => {
+        hand.forEach((sd, i) => {
+          sd.spr.x = pcx + offs[i][0];
+          sd.spr.y = pcy + offs[i][1];
+          sd.spr.sc = 1.15;
+          sd.spr.lift = 0.7;
+        });
+        hop(0);
+      });
+
+      function hop(idx) {
+        if (idx >= drops.length) { later(2, gen, afterSow); return; }
+        const to = drops[idx].to;
+        const [tx, ty] = pitCenter(to);
+        const lead = hand.shift();
+        const slot = pitSeeds[to].length;
+        const pos = slotPos(to, slot);
+        pitSeeds[to].push(lead);
+        const offsN = hand.map((_, i) => flightOff(i, hand.length));
+        const mv = [lead].concat(hand).map((sd, i) => ({
+          sd, x0: sd.spr.x, y0: sd.spr.y, r0: sd.spr.rot,
+          x1: i === 0 ? pos.x : tx + offsN[i - 1][0],
+          y1: i === 0 ? pos.y : ty + offsN[i - 1][1],
+          r1: i === 0 ? nearRot(sd.spr.rot, sd.rot) : sd.spr.rot + 1.4,
+        }));
+        for (let k = 1; k <= hopF; k++) {
+          later(k, gen, () => {
+            const u = k / hopF, arc = Math.sin(Math.PI * u);
+            for (let i = 0; i < mv.length; i++) {
+              const m = mv[i], s = m.sd.spr;
+              s.x = m.x0 + (m.x1 - m.x0) * u;
+              s.y = m.y0 + (m.y1 - m.y0) * u - arc * 50;
+              s.rot = m.r0 + (m.r1 - m.r0) * u;
+              if (i === 0) { s.lift = 0.7 - 0.6 * u + 0.35 * arc; s.sc = 1.15 + 0.01 * u; }
+              else { s.lift = 0.7 + 0.35 * arc; s.sc = 1.15; }
+            }
+            if (k === hopF) {
+              const s = lead.spr;
+              s.x = pos.x; s.y = pos.y; s.z = pos.z; s.rot = lead.rot;
+              s.sc = 1.16; s.lift = 0.1;
+              if (to === 6 || to === 13) K.snd.store(); else tok(idx);
+              setBadge(to, dispCounts[to] + 1);
+              later(1, gen, () => { s.sc = 1; s.lift = 0; s.order = pos.order; });
+              hop(idx + 1);
+            }
+          });
+        }
+      }
+
+      function afterSow() {
+        const capStep = res.steps.find(st => st.capture);
+        const swStep = res.steps.find(st => st.sweep);
+        const extraStep = res.steps.find(st => st.extra);
+        const finish = () => {
+          state = res.state;
+          for (let i = 0; i < 14; i++) setBadge(i, state.pits[i]);
+          busy = false;
+          clearRings();
+          onMoveFinished(mover, !!(extraStep && !state.over));
+        };
+        const afterCap = () => {
+          if (extraStep && !state.over) {
+            ctx.setHint(`${nameOf(mover)} goes again`);
+            K.snd.extra();
+            const pulse = [1.14, 1.24, 1.0];
+            pulse.forEach((v, i) => later(i + 1, gen, () => {
+              ring.sc = v;
+              if (i === pulse.length - 1) finish();
+            }));
+            return;
+          }
+          if (swStep) runSweep(swStep.sweep, finish, gen);
+          else finish();
+        };
+        if (capStep) runCapture(capStep.capture, mover, afterCap, gen);
+        else afterCap();
+      }
+    }
+
+    // Beads that go to a store (a capture, or the sweep at the end): lift together 2 frames, then slide
+    // in 6 frames, one "tok" for each bead that arrives.
+    function slideAll(items, gen, done) {
+      const n = items.length;
+      if (!n) { done(); return; }
+      const rec = items.map((it, i) => {
+        const slot = pitSeeds[it.to].length;
+        pitSeeds[it.to].push(it.sd);
+        const s = it.sd.spr;
+        ctx.killTw(s, ['x', 'y', 'z', 'lift', 'sc', 'rot']);
+        s.order = 90 + (i % 30);
+        return {
+          sd: it.sd, to: it.to, pos: slotPos(it.to, slot),
+          x0: s.x, y0: s.y, d: n > 1 ? Math.round((i * 2) / (n - 1)) : 0,
+        };
+      });
+      let tokN = 0;
+      for (let f = 1; f <= 9; f++) {
+        later(f, gen, () => {
+          for (const r of rec) {
+            const s = r.sd.spr;
+            if (f <= 2) { s.sc = 1 + 0.075 * f; s.lift = 0.35 * f; continue; }
+            const k = f - 2 - r.d;
+            if (k < 1) continue;
+            if (k <= 4) {
+              const u = k / 4;
+              s.x = r.x0 + (r.pos.x - r.x0) * u;
+              s.y = r.y0 + (r.pos.y - r.y0) * u;
+              s.lift = 0.7 - 0.6 * u;
+              s.sc = 1.15 + 0.01 * u;
+              if (k === 4) {
+                s.z = r.pos.z;
+                tok(tokN++);
+                setBadge(r.to, dispCounts[r.to] + 1);
+              }
+            } else if (k === 5) {
+              s.sc = 1; s.lift = 0; s.order = r.pos.order; s.rot = r.sd.rot;
+            }
+          }
+          if (f === 9) done();
+        });
+      }
     }
 
     function runCapture(cap, mover, next, gen) {
-      const [px] = pitCenter(cap.pit);
-      popBoardTab(
-        'Capture!',
-        px,
-        GY,
-        mover === 1 ? K.COL.p1 : K.COL.p2,
-        CREAM,
-        (mover === 2 && isAcross()) ? Math.PI : 0
-      );
-      const queue = [];
-      while (pitSeeds[cap.pit].length) queue.push({ sd: pitSeeds[cap.pit].shift(), from: cap.pit });
-      while (pitSeeds[cap.opposite].length) queue.push({ sd: pitSeeds[cap.opposite].shift(), from: cap.opposite });
-      if (!queue.length) { next(); return; }
-
-      let landed = 0;
-      for (let i = 0; i < queue.length; i++) {
-        const item = queue[i];
-        guardAfter(i * (2 / 12), gen, () => {
-          hopSeedTo(item.sd, item.from, cap.store, i, gen, () => {
-            landed++;
-            if (landed === queue.length) {
-              K.snd.capture();
-              guardAfter(2 / 12, gen, next);
-            }
-          });
-        });
+      const items = [];
+      for (const src of [cap.pit, cap.opposite]) {
+        while (pitSeeds[src].length) items.push({ sd: pitSeeds[src].shift(), to: cap.store });
+        setBadge(src, 0);
       }
+      if (!items.length) { next(); return; }
+      ctx.setHint(`${nameOf(mover)} captures ${seedsWord(items.length)}`);
+      slideAll(items, gen, next);
     }
 
     function runSweep(sweep, next, gen) {
-      const queue = [];
+      const items = [];
       for (const entry of sweep) {
-        while (pitSeeds[entry.from].length) {
-          queue.push({ sd: pitSeeds[entry.from].shift(), from: entry.from, to: entry.to });
-        }
+        while (pitSeeds[entry.from].length) items.push({ sd: pitSeeds[entry.from].shift(), to: entry.to });
+        setBadge(entry.from, 0);
       }
-      if (!queue.length) { next(); return; }
-
-      let landed = 0;
-      for (let i = 0; i < queue.length; i++) {
-        const item = queue[i];
-        guardAfter(i * (1 / 12), gen, () => {
-          hopSeedTo(item.sd, item.from, item.to, i, gen, () => {
-            landed++;
-            if (landed === queue.length) {
-              guardAfter(1 / 12, gen, next);
-            }
-          });
-        });
-      }
-    }
-
-    function showExtraTurn(mover) {
-      const tx = mover === 1 ? GX + 315 : GX - 315;
-      popBoardTab(
-        'Extra turn!',
-        tx,
-        GY,
-        PAP[5],
-        INK,
-        (mover === 2 && isAcross()) ? Math.PI : 0
-      );
-      K.snd.extra();
+      slideAll(items, gen, next);
     }
 
     function syncTurnUI(hop, customHint) {
@@ -1007,12 +1250,14 @@
     function scheduleBotIfNeeded() {
       if (state.over || busy || opt.players !== 1 || state.turn !== 2) return;
       const gen = runGen;
-      const delay = K.botDelay();
-      guardAfter(delay, gen, () => {
+      const go = () => {
         if (state.over || busy || opt.players !== 1 || state.turn !== 2) return;
         const pit = L.bot(state, opt.bot, K.rnd);
         if (pit !== null) commitMove(pit);
-      });
+      };
+      // "Paper Bot is thinking" for 6 frames, then the move is the same as a child's
+      if (K.isFast()) guardAfter(0, gen, go);
+      else later(6, gen, go);
     }
 
     let endRibbon = null;
@@ -1118,82 +1363,7 @@
         return { steps: res.steps };
       }
 
-      const hand = pitSeeds[pit].slice();
-      pitSeeds[pit].length = 0;
-      setBadge(pit, 0);
-
-      const drops = res.steps.filter(st => st.to !== undefined);
-      const total = hand.length;
-      const stepSec = total <= 8 ? (2 / 12) : (1 / 12);
-
-      // Phase 1: Lift (2 frames)
-      for (let i = 0; i < hand.length; i++) {
-        const sd = hand[i];
-        const [bx, by] = bunchPos(pit, i, total);
-        sd.spr.order = 90 + i;
-        K.tw(sd.spr, { x: bx, y: by, lift: 0.5 }, 2 / 12, { cut: true });
-      }
-
-      // Phase 2: Sow (one seed per step)
-      function doDrop(idx) {
-        if (!alive || runGen !== gen) return;
-        if (idx >= drops.length) {
-          // Wait for last 2-frame drop to land before resolve
-          guardAfter(2 / 12, gen, () => {
-            const capStep = res.steps.find(st => st.capture);
-            const swStep = res.steps.find(st => st.sweep);
-            const extraStep = res.steps.find(st => st.extra);
-            const afterCap = () => {
-              const afterSw = () => {
-                state = res.state;
-                for (let i = 0; i < 14; i++) setBadge(i, state.pits[i]);
-                busy = false;
-                if (extraStep && !state.over) showExtraTurn(mover);
-                onMoveFinished(mover, !!(extraStep && !state.over));
-              };
-              if (swStep) runSweep(swStep.sweep, afterSw, gen);
-              else afterSw();
-            };
-            if (capStep) runCapture(capStep.capture, mover, afterCap, gen);
-            else afterCap();
-          });
-          return;
-        }
-
-        const to = drops[idx].to;
-        const sd = hand.shift();
-        // Hop remaining bunch above `to` in 1 frame
-        for (let j = 0; j < hand.length; j++) {
-          const [bx, by] = bunchPos(to, j, hand.length);
-          hand[j].spr.order = 90 + j;
-          K.tw(hand[j].spr, { x: bx, y: by, lift: 0.5 }, 1 / 12, { cut: true });
-        }
-
-        if (sd) {
-          const slot = pitSeeds[to].length;
-          pitSeeds[to].push(sd);
-          const pos = slotPos(to, slot);
-          sd.spr.order = 89;
-          if (to === 6 || to === 13) K.snd.store();
-          else K.snd.clack(idx);
-          K.tw(sd.spr, { x: pos.x, y: pos.y, z: pos.z, lift: 0 }, 2 / 12, {
-            cut: true,
-            done() {
-              if (!alive || runGen !== gen) return;
-              sd.spr.order = pos.order;
-              setBadge(to, dispCounts[to] + 1);
-            },
-          });
-        }
-
-        if (idx + 1 < drops.length) {
-          guardAfter(stepSec, gen, () => doDrop(idx + 1));
-        } else {
-          doDrop(idx + 1);
-        }
-      }
-
-      guardAfter(2 / 12, gen, () => doDrop(0));
+      runSow(pit, res, mover, gen);
       return { steps: res.steps };
     }
 
@@ -1261,7 +1431,8 @@
     function up(e, p) { if (!overShown) press.up(e, p); }
     function cancel() { press.cancel(); }
 
-    function update() {
+    function update(dt) {
+      tickFrames(dt || 1 / 60);
       for (let i = 0; i < 14; i++) {
         const b = badges[i];
         if (b) b.rot = badgeBaseRot(i) + ctx.wobbleRot(b);
@@ -1284,6 +1455,7 @@
 
     function freeLocalTexs() {
       if (ringTex) { B.freeTex(ringTex); ringTex = null; }
+      if (storeRingTex) { B.freeTex(storeRingTex); storeRingTex = null; }
       if (dotTex) { B.freeTex(dotTex); dotTex = null; }
       if (starDotTex) { B.freeTex(starDotTex); starDotTex = null; }
       if (beanTexs) { for (const t of beanTexs) if (t) B.freeTex(t); beanTexs = null; }
