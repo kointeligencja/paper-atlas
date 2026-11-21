@@ -1437,6 +1437,7 @@
           return;
         }
         if (bh.id === 'undo') { undo(); return; }
+        if ((bh.id === 'zoomIn' || bh.id === 'zoomOut') && activeGame && activeGame.zoom) { activeGame.zoom(bh.id === 'zoomIn' ? 1 : -1, bh.s); return; }
         ctx.press(bh.id);
         return;
       }
@@ -1716,7 +1717,9 @@
       btnOn, press, enter, exit,
       down, move, up, cancel,
       update, layoutHud, rebake, undo,
-      cleanSave, api
+      cleanSave, api,
+      zoomable: () => !!(screen === 'play' && activeGame && activeGame.zoom && activeGame.zoomable),
+      zoom(dir, s) { if (screen === 'play' && activeGame && activeGame.zoom && activeGame.zoomable) activeGame.zoom(dir, s); }
     };
   };
 })();

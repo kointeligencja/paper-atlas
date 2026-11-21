@@ -4619,6 +4619,7 @@
       }
       return;
     }
+    if (GM && mode === 'games' && isZoomBtn(id)) { GM.zoom(id === 'zoomIn' ? 1 : -1, btn[id]); return; } // games
     if (id === 'zoomOut' || id === 'zoomIn') { zoomStep(id === 'zoomIn' ? 1 : -1, btn[id]); return; }
     if (!RD) return;
     if (id === 'hint') {
@@ -4699,8 +4700,10 @@
     if (k === 0) { if (mode === 'map' && RD) { const b = contFrame(RD.ct); RD.baseCam = b; camTo(b.x, b.y, b.h, 0.45); } else camTo(base.x, base.y, base.h, 0.45); return; }
     const cl = clampCamVals(goal.x, goal.y, base.h * Math.pow(r, k)); camTo(cl.x, cl.y, cl.h, 0.45);
   }
+  let gmWheelT = 0; // games: one zoom step per wheel burst
   B.cv.addEventListener('wheel', e => {
     e.preventDefault();
+    if (GM && mode === 'games') { if (GM.zoomable() && e.deltaY && performance.now() - gmWheelT > 300) { gmWheelT = performance.now(); GM.zoom(e.deltaY < 0 ? 1 : -1); } return; } // games
     if (!zoomable()) return;
     idleTime = 0;
     killTw(cam);
@@ -4722,7 +4725,7 @@
     idleTime = 0; zoomAt(e.clientX, e.clientY, gest.h0 * Math.pow(e.scale, -1.6) / cam.h); followCam(e);
   }, { passive: false });
   B.cv.addEventListener('click', () => { if (pendingFocus) { focusNameInput(); pendingFocus = false; } });
-  addEventListener('keydown', e => { if (isPhonePortrait()) return; if (inp && document.activeElement === inp) return; idleTime = 0; if (attract) { stopAttract(); return; } if (needFirstPick) { needFirstPick = false; openPicker('pick'); return; } if (picker) { if (e.key === 'Escape' && currentPlayer()) closePicker(true); return; } if (passport) { if (e.key === 'Escape') { e.preventDefault(); closePassport(true); } else if (e.key === 'ArrowRight') { e.preventDefault(); turnPassport(1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); turnPassport(-1); } return; } const k = e.key.toLowerCase(); if (k === 'r' || k === ' ') { if (mode === 'map' && RD && RD.piece) turn(RD.piece); else if (mode === 'world' && nextCont()) beginRound(nextCont()); } else if (k === 'enter' && mode === 'world' && nextCont()) beginRound(nextCont()); else if (k === 'h') press('hint'); else if (k === 'z' || k === 'u') press('undo'); else if (k === 'escape' || k === 'w') press('world'); else if (k === 's') press('sound'); else if (!e.ctrlKey && !e.metaKey && (k === '+' || k === '=' || k === '-') && zoomable()) press(k === '-' ? 'zoomOut' : 'zoomIn'); });
+  addEventListener('keydown', e => { if (isPhonePortrait()) return; if (inp && document.activeElement === inp) return; idleTime = 0; if (attract) { stopAttract(); return; } if (needFirstPick) { needFirstPick = false; openPicker('pick'); return; } if (picker) { if (e.key === 'Escape' && currentPlayer()) closePicker(true); return; } if (passport) { if (e.key === 'Escape') { e.preventDefault(); closePassport(true); } else if (e.key === 'ArrowRight') { e.preventDefault(); turnPassport(1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); turnPassport(-1); } return; } const k = e.key.toLowerCase(); if (k === 'r' || k === ' ') { if (mode === 'map' && RD && RD.piece) turn(RD.piece); else if (mode === 'world' && nextCont()) beginRound(nextCont()); } else if (k === 'enter' && mode === 'world' && nextCont()) beginRound(nextCont()); else if (k === 'h') press('hint'); else if (k === 'z' || k === 'u') press('undo'); else if (k === 'escape' || k === 'w') press('world'); else if (k === 's') press('sound'); else if (!e.ctrlKey && !e.metaKey && (k === '+' || k === '=' || k === '-') && (zoomable() || (GM && mode === 'games' && GM.zoomable()))) press(k === '-' ? 'zoomOut' : 'zoomIn'); });
   let resizeTmr = null, lastCam = { x: cam.x, y: cam.y, h: cam.h }, camStill = 0;
   function onResizeSettled() {
     rebakeFonts();
