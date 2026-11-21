@@ -1017,6 +1017,13 @@
       const L = 84, W = Math.round(L * scale), k = W / L;
       const t = ctx.shapeTex(W, W, b => {
         B.paper(b, ctx.cutEdge(4 * k, 4 * k, W - 4 * k, W - 4 * k, 5 * k, ctx.sid(col) + 41), col, 0.35);
+        // a small two-layer paper disc in the bot's own colour: reads as "the other player's piece"
+        const lum = (() => { const m = /^#([0-9a-f]{6})$/i.exec(col); if (!m) return 0.5; const n = parseInt(m[1], 16); return (((n >> 16) & 255) * 0.3 + ((n >> 8) & 255) * 0.59 + (n & 255) * 0.11) / 255; })();
+        const rim = lum > 0.55 ? ctx.shade(col, -0.42) : ctx.shade(col, 0.5);
+        const cx = W / 2, cy = W / 2, R = 25 * k;
+        B.paper(b, q => q.arc(cx + 2 * k, cy + 3 * k, R, 0, Math.PI * 2), rim, 0.5);
+        B.paper(b, q => q.arc(cx, cy, R - 1.5 * k, 0, Math.PI * 2), col, 0.72);
+        B.paper(b, q => q.arc(cx, cy, R - 8 * k, 0, Math.PI * 2), ctx.shade(col, lum > 0.55 ? 0.12 : 0.18), 0.88);
       }, { noMip: true });
       t.lw = L; t.lh = L;
       tokCache[key] = t;

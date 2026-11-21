@@ -608,14 +608,20 @@
     let dishTex = null;
     let dishSpr = { 1: null, 2: null };
     let waitDiscSpr = null;
+    let waitSide = 0;
+    let waitBorn = 0;
     let railSpr = null;
     let pipSprs = [];
+    let pipsBy = { 1: [], 2: [] }; // pip sprites per side, in well order (0 = that side's outer end)
+    let pipSz = 40;
+    let edgeTex = { 1: null, 2: null };
     let badgeSpr = { 1: null, 2: null };
 
     function freeDiscTex() {
       for (const s of [1, 2]) {
         if (discTex[s]) { B.freeTex(discTex[s]); discTex[s] = null; }
         if (pipTex[s]) { B.freeTex(pipTex[s]); pipTex[s] = null; }
+        if (edgeTex[s]) { B.freeTex(edgeTex[s]); edgeTex[s] = null; }
       }
       if (dishTex) { B.freeTex(dishTex); dishTex = null; }
     }
@@ -689,8 +695,20 @@
       });
     }
 
+    // a disc seen edge-on: two papers glued back to back (left = the face it leaves, right = the face it lands on)
+    function bakeEdgeTex(newSide) {
+      const S = 200, cx = S / 2, cy = S / 2, R = 84;
+      const colOf = sd => (sd === 1 ? DISC_DARK : DISC_LIGHT);
+      return ctx.shapeTex(S, S, b => {
+        B.paper(b, q => { q.arc(cx, cy, R, Math.PI / 2, Math.PI * 1.5); q.closePath(); }, colOf(3 - newSide), 0.8);
+        B.paper(b, q => { q.arc(cx, cy, R, -Math.PI / 2, Math.PI / 2); q.closePath(); }, colOf(newSide), 0.8);
+      });
+    }
+
     function ensureDiscTextures() {
       freeDiscTex();
+      edgeTex[1] = bakeEdgeTex(1);
+      edgeTex[2] = bakeEdgeTex(2);
       discTex[1] = bakeDiscTex(1, opt.look);
       discTex[2] = bakeDiscTex(2, opt.look);
       pipTex[1] = bakePipTex(1);
@@ -846,6 +864,7 @@
     function clearPips() {
       for (const p of pipSprs) K.kill(p);
       pipSprs = [];
+      pipsBy = { 1: [], 2: [] };
     }
 
     function clearTrays() {
@@ -854,6 +873,7 @@
         if (badgeSpr[s]) { K.kill(badgeSpr[s]); badgeSpr[s] = null; }
       }
       if (waitDiscSpr) { K.kill(waitDiscSpr); waitDiscSpr = null; }
+      if (ghost) { K.kill(ghost.s); ghost = null; }
       if (railSpr) { K.kill(railSpr); railSpr = null; }
       clearPips();
     }
@@ -900,31 +920,46 @@
       if (!pipTex[1] || !pipTex[2]) return;
       const L = railLayout(st.n);
       const pSz = L.pipR * 2 * (32 / 25); // visual pip diameter = 2 * pipR (40 wu)
+      pipSz = pSz;
       for (let i = 0; i < cnt.x && i < L.total; i++) {
         const p = L.wellPos(i);
-        pipSprs.push(K.spr(pipTex[1], {
+        const sp = K.spr(pipTex[1], {
           x: GT[0] + p[0], y: RAIL_Y + p[1], w: pSz, h: pSz,
           z: 0.21, zr: 0.06, order: 32, own: false,
-        }));
+        });
+        pipSprs.push(sp); pipsBy[1].push(sp);
       }
       for (let i = 0; i < cnt.o && i < L.total; i++) {
         const p = L.wellPos(L.total - 1 - i);
-        pipSprs.push(K.spr(pipTex[2], {
+        const sp = K.spr(pipTex[2], {
           x: GT[0] + p[0], y: RAIL_Y + p[1], w: pSz, h: pSz,
           z: 0.21, zr: 0.06, order: 32, own: false,
-        }));
+        });
+        pipSprs.push(sp); pipsBy[2].push(sp);
       }
     }
 
-    function updateTurnTab() {
+    // where a side's n-th pip sits in the rail
+    function pipPos(side, idx) {
+      const L = railLayout(st.n);
+      const p = L.wellPos(side === 1 ? idx : L.total - 1 - idx);
+      return [GT[0] + p[0], RAIL_Y + p[1]];
+    }
+
+    // the mover's next disc waits in its dish and breathes; with drop=true it is set down onto the dish (1.12, 0.96, then breathing)
+    function updateTurnTab(drop) {
+      if (waitDiscSpr && st && !st.over && waitSide === st.turn) return;
       if (waitDiscSpr) { K.kill(waitDiscSpr); waitDiscSpr = null; }
       if (!st || st.over || !discTex[st.turn]) return;
       const dp = dishPos(st.turn);
       const sz = discWorldSize();
+      waitSide = st.turn;
       waitDiscSpr = K.spr(discTex[st.turn], {
         x: dp[0], y: dp[1], w: sz, h: sz,
         z: 0.24, zr: 0.12, order: 36, sx: 1, own: false,
       });
+      waitBorn = (drop && !K.fast) ? frameNo : frameNo - 2;
+      waitFrame(frameNo);
     }
 
     // ---- Move Dots, Preview & Input (PRD 8.3) ----
@@ -974,7 +1009,7 @@
       dotSprs = [];
     }
 
-    function showDots() {
+    function showDots(stagger) {
       clearDots();
       if (!st || st.over || busyFlag || !opt.dots || isBotSide(st.turn)) return;
       const moves = logic.legal(st);
@@ -987,6 +1022,12 @@
           z: 0.31, zr: 0.015, order: 34, own: false,
         });
         dotSprs.push({ r, c, s });
+        if (stagger && !K.fast) {
+          // pressed in one per frame, in reading order
+          s.alpha = 0;
+          addLater(2 + i, () => { s.alpha = 1; s.sc = 1.25; });
+          addLater(3 + i, () => { s.sc = 1; });
+        }
       }
     }
 
@@ -1099,45 +1140,190 @@
       isBusy: () => !st || st.over || busyFlag || isBotSide(st.turn),
     });
 
-    // ---- Placing, Flip Cascade & Pass Notice (PRD 8.3, 8.4) ----
+    // ---- Motion: Place, Flip Ripple, Score Hops, Pass & End (OTHELLO_v3 section 2; 12 fps frames) ----
+    // Reference timing: audit/design_games/round3/proto/othello.html (its update function).
     let anim = null;
     let enterTurnFn = null;
     let onGameOverFn = null;
+    let frameNo = 0;      // 12 fps frame counter, advanced from update(dt)
+    let clk = 0;
+    let later = [];       // { f, gen, fn }: things to do on a later frame
+    let ghost = null;     // the disc that drops onto its seat to say "no move" on a pass
 
-    function applyAnimStep(a, step) {
-      // Drop frames 0..3
-      if (step === 0) a.placed.lift = 0.50;
-      else if (step === 1) a.placed.lift = 0.30;
-      else if (step === 2) a.placed.lift = 0.12;
-      else if (step === 3) {
-        a.placed.lift = 0;
-        a.placed.order = 40;
-        K.snd.slap(true);
+    const BREATH = [0, 0.02, 0.04, 0.05, 0.05, 0.04, 0.02, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const FL_SX = [1, 0.82, 0.45, 0.14, 0.5, 1, 1];
+    const FL_Z = [0, 0.45, 0.8, 1.0, 0.8, 0, 0];
+    const FLIP0 = 8, RING_GAP = 2, FL_N = 6, HOP_N = 4;
+    const TICK_HZ = [262, 294, 330, 392, 440, 524];
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const lim01 = v => Math.max(0, Math.min(1, v));
+
+    function addLater(frames, fn) { later.push({ f: frameNo + frames, gen, fn }); }
+
+    function dropAnim() {
+      if (anim && anim.newPip) K.kill(anim.newPip);
+      anim = null;
+      clearMotion();
+    }
+
+    function clearMotion() {
+      later = [];
+      if (ghost) { K.kill(ghost.s); ghost = null; }
+      if (boardSpr) boardSpr.sc = 1;
+    }
+
+    function waitFrame(fr) {
+      const s = waitDiscSpr;
+      if (!s) return;
+      const n = fr - waitBorn;
+      if (K.fast) { s.lift = 0; s.sc = 1; return; }
+      if (n <= 0) { s.lift = 0.5; s.sc = 1; }                 // set down: lift (1.12) ...
+      else if (n === 1) { s.lift = 0; s.sc = 0.96; }          // ... settle (0.96) ...
+      else { s.lift = BREATH[(n - 2) % 16] * 5; s.sc = 1; }   // ... then breathe, quietly
+    }
+
+    function sndTock(corner) {
+      const f = corner ? 75 : 150;
+      ctx.tone(f, 0.10, 'sine', corner ? 0.30 : 0.24, f * 0.62);
+      ctx.noise(0.05, corner ? 600 : 900, 0.24);
+    }
+    function sndTick(ring, loud) {
+      const hz = TICK_HZ[Math.min(Math.max(ring, 1), TICK_HZ.length) - 1];
+      ctx.noise(0.03, 3400, loud ? 0.26 : 0.20);
+      ctx.tone(hz * 2, 0.06, 'triangle', loud ? 0.15 : 0.11);
+    }
+
+    // one frame k (1-based, from the lift) of a move; a stateless function of k, as in the prototype
+    function animFrame(a, k) {
+      const sc = a.scl, side = a.side, opp = 3 - side, p = a.placed;
+      // the placed disc: lift 1, carried 2-4 on an arc, hover 5, press 6 ("tock"), rest 7
+      if (k === 1) { p.x = a.dx; p.y = a.dy - 6 * sc; p.lift = 0.55; p.sc = 1; p.z = 0.36; p.order = 62; }
+      else if (k <= 4) {
+        const u = (k - 1) / 4, e = 1 - (1 - u) * (1 - u);
+        p.x = lerp(a.dx, a.tx, e); p.y = lerp(a.dy, a.ty, e) - Math.sin(u * Math.PI) * 46 * sc; p.lift = 0.6;
+      } else if (k === 5) { p.x = a.tx; p.y = a.ty - 4 * sc; p.lift = 0.45; }
+      else if (k === 6) {
+        p.x = a.tx; p.y = a.ty; p.lift = 0; p.sc = a.corner ? 0.92 : 0.95; p.order = 50;
+        sndTock(a.corner);
+        if (a.corner && boardSpr) boardSpr.sc = 0.995;
+      } else if (k === 7) { p.sc = a.corner ? 0.92 : 1; p.order = 40; if (boardSpr) boardSpr.sc = 1; }
+      else if (k === 8) p.sc = 1;
+
+      // the ripple: 6 frames a disc, rings 2 frames apart, each disc tips away from the one just placed
+      for (const f of a.flips) {
+        const st0 = FLIP0 + (f.ring - 1) * RING_GAP, u = Math.max(0, Math.min(FL_N, k - st0)), s = f.ds;
+        const mid = Math.sin(u / FL_N * Math.PI);
+        s.sx = FL_SX[u]; s.lift = FL_Z[u] * 0.7; s.sc = u === 5 ? 0.95 : 1;
+        s.tex = u < 3 ? discTex[opp] : (u === 3 ? edgeTex[side] : discTex[side]);
+        s.order = (u > 0 && u < 5) ? 52 : 40;
+        s.rot = (u > 0 && u < 5) ? f.ang : f.r0;
+        s.x = f.bx + Math.cos(f.ang) * 5 * sc * mid; s.y = f.by + Math.sin(f.ang) * 5 * sc * mid;
+        if (u === 5 && k === st0 + 5 && f.first) sndTick(f.ring, f.ringN > 1);
       }
 
-      // Rings: each turn takes 4 frames:
-      // rel 0: sx=0.5, lift=0.2 (play flip(k))
-      // rel 1: sx=0.08, lift=0.3 (swap texture!)
-      // rel 2: sx=0.5, lift=0.2
-      // rel 3: sx=1.0, lift=0.0 (flat)
-      for (let i = 0; i < a.rings.length; i++) {
-        const ring = a.rings[i];
-        const rel = step - ring.startF;
-        if (rel === 0) {
-          K.snd.flip(ring.k);
-          for (const ds of ring.discs) { ds.sx = 0.5; ds.lift = 0.2; ds.order = 52; }
-        } else if (rel === 1) {
-          for (const ds of ring.discs) { ds.sx = 0.08; ds.lift = 0.3; ds.tex = discTex[a.side]; }
-        } else if (rel === 2) {
-          for (const ds of ring.discs) { ds.sx = 0.5; ds.lift = 0.2; }
-        } else if (rel === 3) {
-          for (const ds of ring.discs) { ds.sx = 1; ds.lift = 0; ds.order = 40; }
+      // the tally: the placed disc adds one pip; each turned disc sends one pip across the gap, turning over in flight
+      const np = a.newPip;
+      if (np) {
+        np.alpha = k >= 5 ? 1 : 0;
+        np.lift = k === 5 ? 0.6 : 0; np.sc = k === 5 ? 1.3 : (k === 6 ? 0.92 : 1);
+        np.y = a.npY - (k === 5 ? 8 * sc : 0);
+      }
+      let nP = a.cP0 + (k >= 6 ? 1 : 0), nO = a.cO0;
+      for (const h of a.hops) {
+        const u = lim01((k - h.arrive) / HOP_N), arc = Math.sin(u * Math.PI);
+        const s = h.s;
+        s.x = lerp(h.x0, h.x1, u); s.y = lerp(h.y0, h.y1, u) - arc * 56 * sc;
+        s.lift = arc * 1.4; s.sx = (u > 0 && u < 1) ? Math.max(0.2, Math.abs(Math.cos(u * Math.PI))) : 1;
+        s.tex = pipTex[u >= 0.5 ? side : opp];
+        s.order = (u > 0 && u < 1) ? 58 : 34;
+        if (u > 0) nO--;
+        if (u >= 1) nP++;
+      }
+      for (const [sd, n] of [[side, nP], [opp, nO]]) {
+        const bs = badgeSpr[sd];
+        if (!bs) continue;
+        const changed = a.shown[sd] !== n;
+        if (changed) { a.shown[sd] = n; bs.tex = K.badge(n); }
+        bs.sc = changed ? 0.94 : 1;
+      }
+    }
+
+    function endAnim() {
+      // all pips down: rebuild the tally from the true state (also resets any sprite left in the air)
+      const a = anim;
+      anim = null;
+      if (a.newPip) K.kill(a.newPip);
+      for (const bs of [badgeSpr[1], badgeSpr[2]]) if (bs) bs.sc = 1;
+      syncTally(false);
+      if (a.res.over || a.res.pass) finishMove(a.res);
+    }
+
+    // frame clock: everything moves on whole 12 fps frames
+    function tickFrame() {
+      if (anim) {
+        anim.k++;
+        animFrame(anim, anim.k);
+        if (anim.k === anim.endK + 1 && !anim.tail) {
+          anim.tail = true;
+          if (!anim.res.over && !anim.res.pass) finishMove(anim.res);
+        }
+        if (anim && anim.k >= anim.tailEnd) endAnim();
+      }
+      waitFrame(frameNo);
+      if (ghost) {
+        const n = frameNo - ghost.born, s = ghost.s;
+        if (n === 0) { s.lift = 0.5; s.sc = 1; }
+        else if (n === 1) { s.lift = 0; s.sc = 0.96; }
+        else if (n === 2) s.rot = 0.16;
+        else if (n === 3) s.rot = -0.12;
+        else if (n === 4) s.rot = 0;
+        else if (n === 5) { s.sc = 0.7; s.alpha = 0.7; }
+        else if (n === 6) { s.sc = 0.35; s.alpha = 0.35; }
+        else { K.kill(s); ghost = null; }
+      }
+      if (later.length) {
+        const due = later.filter(e => e.f <= frameNo);
+        if (due.length) {
+          later = later.filter(e => e.f > frameNo);
+          for (const e of due) if (e.gen === gen) e.fn();
         }
       }
     }
 
+    // a side with no move: its disc drops onto its seat, wobbles "no", sinks; then the other seat's disc comes back
+    function passSeat(side) {
+      if (K.fast || !discTex[side]) return;
+      const dp = dishPos(side), sz = discWorldSize();
+      if (ghost) K.kill(ghost.s);
+      const s = K.spr(discTex[side], { x: dp[0], y: dp[1], w: sz, h: sz, z: 0.24, zr: 0.12, order: 36, sx: 1, own: false });
+      ghost = { s, born: frameNo };
+      s.lift = 0.5;
+      addLater(8, () => updateTurnTab(true));
+    }
+
+    // the end: the winner's pips hop once each from the middle mark outward, the number lifts; then the ribbon
+    function endHopFrames() {
+      const w = st && st.winner;
+      if (K.fast || !w) return 0;
+      const arr = (pipsBy[w] || []).slice().reverse();
+      const two = arr.length > 16;
+      let last = 0;
+      arr.forEach((s, j) => {
+        const f0 = two ? (j >> 1) : j;
+        const y0 = s.y, up = 12 * (sqSize() / 68);
+        last = Math.max(last, f0 + 2);
+        addLater(1 + f0, () => { s.y = y0 - up; s.lift = 0.9; });
+        addLater(2 + f0, () => { s.y = y0; s.lift = 0; });
+      });
+      const bs = badgeSpr[w];
+      if (bs) {
+        addLater(1, () => { bs.sc = 1.15; });
+        addLater(4, () => { bs.sc = 1; });
+      }
+      return Math.max(last, 4);
+    }
+
     function finishMove(res) {
-      syncTally(true);
       if (res.over) {
         busyFlag = false;
         updateTurnTab();
@@ -1152,6 +1338,7 @@
         if (ctx.speakText) ctx.speakText('No moves for ' + passedName + '. ' + againName + ' goes again');
         const myGen = gen;
         busyFlag = true;
+        passSeat(res.pass);
         K.after(1.8, () => {
           if (destroyed || myGen !== gen) return;
           busyFlag = false;
@@ -1163,7 +1350,13 @@
       if (enterTurnFn) enterTurnFn(true);
     }
 
+    function isCorner(r, c) {
+      const m = st.n - 1;
+      return (r === 0 || r === m) && (c === 0 || c === m);
+    }
+
     function commitMove(r, c) {
+      if (anim && anim.tail) endAnim();
       if (!st || st.over || busyFlag || anim) return false;
       const res = logic.play(st, r, c);
       if (!res) return false;
@@ -1178,6 +1371,7 @@
       if (host.onLayout) host.onLayout();
 
       if (K.fast) {
+        if (waitDiscSpr) { K.kill(waitDiscSpr); waitDiscSpr = null; }
         const placed = makeDiscSpr(r, c, placedSide, { lift: 0, order: 40 });
         discGrid[r][c] = placed;
         for (let i = 0; i < res.flipped.length; i++) {
@@ -1186,40 +1380,64 @@
           if (ds) { ds.tex = discTex[placedSide]; ds.sx = 1; ds.lift = 0; ds.order = 40; }
         }
         K.snd.slap(true);
+        syncTally(true);
         finishMove(res);
         return { flipped: res.flipped };
       }
 
       busyFlag = true;
-      const placed = makeDiscSpr(r, c, placedSide, { lift: 0.50, order: 50 });
+      const side = placedSide, opp = 3 - side;
+      const sc = sqSize() / 68;
+      const dp = dishPos(side), tp = sqCenter(r, c);
+      let placed = null;
+      if (waitDiscSpr && waitSide === side) { placed = waitDiscSpr; waitDiscSpr = null; }
+      else {
+        if (waitDiscSpr) { K.kill(waitDiscSpr); waitDiscSpr = null; }
+        placed = makeDiscSpr(r, c, side, { x: dp[0], y: dp[1], z: 0.24, order: 62 });
+      }
       discGrid[r][c] = placed;
 
-      const keys = Object.keys(res.rings).map(Number).sort((a, b) => a - b);
-      const ringList = [];
-      let maxStart = 3;
-      for (let i = 0; i < keys.length; i++) {
-        const k = keys[i];
-        const startF = 3 + (k === 1 ? 0 : k);
-        if (startF > maxStart) maxStart = startF;
-        const coords = res.rings[k];
-        const discs = [];
-        for (let j = 0; j < coords.length; j++) {
-          const ds = discGrid[coords[j][0]] && discGrid[coords[j][0]][coords[j][1]];
-          if (ds) discs.push(ds);
-        }
-        ringList.push({ k, startF, discs });
+      // the turned discs: nearest ring first; ring = distance from the placed disc
+      const list = [];
+      const keys = Object.keys(res.rings).map(Number).sort((x, y) => x - y);
+      let maxRing = 1;
+      for (const kk of keys) {
+        const coords = res.rings[kk];
+        maxRing = Math.max(maxRing, kk);
+        coords.forEach((co, j) => {
+          const ds = discGrid[co[0]] && discGrid[co[0]][co[1]];
+          if (!ds) return;
+          const cp = sqCenter(co[0], co[1]);
+          list.push({ ds, ring: kk, ringN: coords.length, first: j === 0, idx: j, ang: Math.atan2(cp[1] - tp[1], cp[0] - tp[0]), r0: ds.rot || 0, bx: ds.x, by: ds.y });
+        });
       }
+      const cnt1 = logic.count(st);
+      const cP1 = side === 1 ? cnt1.x : cnt1.o, cO1 = side === 1 ? cnt1.o : cnt1.x;
+      const nF = list.length;
+      const cP0 = cP1 - 1 - nF, cO0 = cO1 + nF;
 
+      const hops = [];
+      list.forEach((f, j) => {
+        const s = pipsBy[opp][cO0 - 1 - j];
+        if (!s) return;
+        const from = pipPos(opp, cO0 - 1 - j), to = pipPos(side, cP0 + 1 + j);
+        const st0 = FLIP0 + (f.ring - 1) * RING_GAP;
+        hops.push({ s, x0: from[0], y0: from[1], x1: to[0], y1: to[1], arrive: st0 + 4 + (f.idx % 3) });
+      });
+      const np = pipTex[side] ? K.spr(pipTex[side], { x: 0, y: 0, w: pipSz, h: pipSz, z: 0.21, zr: 0.06, order: 59, own: false, alpha: 0 }) : null;
+      const npPos = pipPos(side, cP0);
+      if (np) { np.x = npPos[0]; np.y = npPos[1]; }
+
+      const endK = FLIP0 + (maxRing - 1) * RING_GAP + FL_N;
+      const tailEnd = Math.max(endK + 2, ...hops.map(h => h.arrive + HOP_N + 1));
       anim = {
-        t: 0,
-        lastF: 0,
-        side: placedSide,
-        placed,
-        rings: ringList,
-        endFrame: maxStart + 4,
-        res,
+        k: 0, side, placed, res, flips: list, hops, newPip: np, npY: npPos[1],
+        dx: dp[0], dy: dp[1], tx: tp[0], ty: tp[1], scl: sc, cP0, cO0, corner: isCorner(r, c),
+        endK, tailEnd, tail: false, shown: { 1: -1, 2: -1 },
       };
-      applyAnimStep(anim, 0);
+      anim.shown[side] = cP0; anim.shown[opp] = cO0;
+      anim.k = 1;
+      animFrame(anim, 1);
       return { flipped: res.flipped };
     }
 
@@ -1240,7 +1458,7 @@
     function enterTurn(hop) {
       if (!st || st.over || destroyed) return;
       const side = st.turn;
-      updateTurnTab();
+      updateTurnTab(hop);
 
       if (isBotSide(side)) {
         clearDots();
@@ -1250,12 +1468,12 @@
         const myGen = gen;
         const delay = K.botDelay();
         K.after(delay, () => {
-          if (destroyed || myGen !== gen || !st || st.over || busyFlag || anim || !isBotSide(st.turn)) return;
+          if (destroyed || myGen !== gen || !st || st.over || busyFlag || (anim && !anim.tail) || !isBotSide(st.turn)) return;
           const mv = logic.bot(st, opt.bot, K.rnd);
           if (mv) commitMove(mv[0], mv[1]);
         });
       } else {
-        showDots();
+        showDots(hop);
         const nm = nameOfSide(side);
         const msg = opt.dots ? (nm + ', pick a square with a dot') : (nm + ', your turn');
         ctx.setHint(msg);
@@ -1311,7 +1529,6 @@
       btnGames.y = by;
 
       if (celebrate) {
-        K.confetti(W / 2, 420, 24, [PAP[10], PAP[0]]);
         if (ctx.sfx && ctx.sfx.wake) ctx.sfx.wake();
         ctx.setHint(line2);
         if (host.onLayout) host.onLayout();
@@ -1328,7 +1545,8 @@
       const winnerSeat = st.winner === 0 ? 0 : seatOf(st.winner);
       if (host.onOver) host.onOver(winnerSeat);
       const myGen = gen;
-      K.after(0.6, () => {
+      const hopFrames = endHopFrames();
+      K.after(Math.max(0.6, (hopFrames + 2) / 12), () => {
         if (destroyed || myGen !== gen || !st || !st.over) return;
         buildEndUi(true);
       });
@@ -1338,7 +1556,7 @@
 
     function start(o, info) {
       gen++;
-      anim = null;
+      dropAnim();
       clearEndUi();
       K.closeNote(true);
       opt = Object.assign({ players: 1, bot: 'easy', size: 8, dots: true, look: 'plain' }, o || {});
@@ -1386,18 +1604,12 @@
     }
     function cancel() { presser.cancel(); }
     function update(dt) {
-      if (!anim || destroyed) return;
-      anim.t += dt;
-      const targetF = Math.floor(anim.t * 12 + 1e-6);
-      while (anim && anim.lastF < targetF) {
-        anim.lastF++;
-        applyAnimStep(anim, anim.lastF);
-        if (anim.lastF >= anim.endFrame) {
-          const res = anim.res;
-          anim = null;
-          finishMove(res);
-          break;
-        }
+      if (destroyed) return;
+      clk += dt;
+      const target = Math.floor(clk * 12 + 1e-6);
+      while (frameNo < target) {
+        frameNo++;
+        tickFrame();
       }
     }
     function layoutHud() {
@@ -1430,13 +1642,13 @@
       }
     }
     function canUndo() {
-      if (!st || st.over || busyFlag || anim) return false;
+      if (!st || st.over || busyFlag || (anim && !anim.tail)) return false;
       return opt.players === 1 ? humanUndoCount > 0 : hist.len() > 0;
     }
     function undo() {
       if (!canUndo()) return;
       gen++;
-      anim = null;
+      dropAnim();
       busyFlag = false;
       presser.cancel();
       clearPreview();
@@ -1464,7 +1676,7 @@
     function destroy() {
       destroyed = true;
       gen++;
-      anim = null;
+      dropAnim();
       presser.cancel();
       clearEndUi();
       clearPreview();
@@ -1496,7 +1708,7 @@
       set(grid, turn) {
         if (!Array.isArray(grid) || !grid.length || destroyed) return;
         gen++;
-        anim = null;
+        dropAnim();
         busyFlag = false;
         presser.cancel();
         clearEndUi();
@@ -1521,7 +1733,7 @@
         return commitMove(r, c);
       },
       bot() {
-        if (!st || st.over || busyFlag || anim || destroyed) return null;
+        if (!st || st.over || busyFlag || (anim && !anim.tail) || destroyed) return null;
         const mv = logic.bot(st, opt.bot, K.rnd);
         if (!mv) return null;
         gen++;
