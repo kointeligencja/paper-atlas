@@ -598,18 +598,26 @@
       }
     }
 
-    // ---- Discs & Trays (PRD 8.2) ----
+    // ---- Discs, Dishes & Score Rail ----
+    const FELT_WELL = '#21523e';
+    const RAIL_MARK = '#ede5d2';
+    const RAIL_Y = GT[1] + 505;
     let discTex = { 1: null, 2: null };
+    let pipTex = { 1: null, 2: null };
     let discGrid = []; // 2D array [r][c] -> sprite | null
-    let traySpr = { 1: null, 2: null };
+    let dishTex = null;
+    let dishSpr = { 1: null, 2: null };
+    let waitDiscSpr = null;
+    let railSpr = null;
+    let pipSprs = [];
     let badgeSpr = { 1: null, 2: null };
-    let miniSprs = { 1: [], 2: [] };
-    let turnTabSpr = null;
 
     function freeDiscTex() {
       for (const s of [1, 2]) {
         if (discTex[s]) { B.freeTex(discTex[s]); discTex[s] = null; }
+        if (pipTex[s]) { B.freeTex(pipTex[s]); pipTex[s] = null; }
       }
+      if (dishTex) { B.freeTex(dishTex); dishTex = null; }
     }
 
     const DISC_DARK = '#1b1b1f';
@@ -669,10 +677,24 @@
       });
     }
 
+    function bakePipTex(side) {
+      const S = 64, cx = 32, cy = 32, R = 25;
+      const body = side === 1 ? DISC_DARK : DISC_LIGHT;
+      const face = side === 1 ? DISC_DARK_FACE : DISC_LIGHT_FACE;
+      const under = side === 1 ? DISC_DARK_UNDER : DISC_LIGHT_UNDER;
+      return ctx.shapeTex(S, S, b => {
+        B.paper(b, q => q.arc(cx + 1.5, cy + 2.5, R, 0, Math.PI * 2), under, 0.45);
+        B.paper(b, q => q.arc(cx, cy, R - 1, 0, Math.PI * 2), body, 0.68);
+        B.paper(b, q => q.arc(cx, cy, R - 5.5, 0, Math.PI * 2), face, 0.86);
+      });
+    }
+
     function ensureDiscTextures() {
       freeDiscTex();
       discTex[1] = bakeDiscTex(1, opt.look);
       discTex[2] = bakeDiscTex(2, opt.look);
+      pipTex[1] = bakePipTex(1);
+      pipTex[2] = bakePipTex(2);
     }
 
     function discWorldSize() {
@@ -713,36 +735,158 @@
       }
     }
 
-    function badgePos(side) {
+    function bakeDishTex() {
+      const S = 220, cx = S / 2, cy = S / 2;
+      const rOut = 98, rLip = 90, rIn = 76;
+      return ctx.shapeTex(S, S, b => {
+        // Outer soft dark felt rim and gentle raised lip
+        B.paper(b, q => q.arc(cx, cy, rOut, 0, Math.PI * 2), FELT_RIM, 0.42);
+        B.paper(b, q => q.arc(cx, cy, rLip, 0, Math.PI * 2), FELT, 0.56);
+        // Sunken circular shallow bowl
+        B.paper(b, q => q.arc(cx, cy, rIn, 0, Math.PI * 2), '#266048', 0.24);
+        // Smooth concave relief slope inside bowl
+        const g = b.g;
+        g.save();
+        g.beginPath(); g.arc(cx, cy, rIn, 0, Math.PI * 2); g.clip();
+        const rg = g.createRadialGradient(cx, cy, rIn * 0.58, cx, cy, rIn);
+        rg.addColorStop(0, B.grey(0.22));
+        rg.addColorStop(0.75, B.grey(0.28));
+        rg.addColorStop(1, B.grey(0.46));
+        g.fillStyle = rg;
+        g.fillRect(cx - rIn, cy - rIn, rIn * 2, rIn * 2);
+        g.restore();
+        // Directional inner shadow + subtle felt fibres inside bowl
+        const c = b.c;
+        c.save();
+        c.beginPath(); c.arc(cx, cy, rIn, 0, Math.PI * 2); c.clip();
+        const sh = c.createRadialGradient(cx + 10, cy + 12, rIn * 0.55, cx + 6, cy + 8, rIn * 1.06);
+        sh.addColorStop(0, 'rgba(10,36,26,0)');
+        sh.addColorStop(0.72, 'rgba(10,36,26,0.14)');
+        sh.addColorStop(1, 'rgba(8,28,20,0.44)');
+        c.fillStyle = sh;
+        c.fillRect(cx - rIn, cy - rIn, rIn * 2, rIn * 2);
+        // Soft catchlight on lower-right inner slope
+        const hi = c.createRadialGradient(cx + 22, cy + 24, 4, cx + 22, cy + 24, rIn * 0.72);
+        hi.addColorStop(0, 'rgba(92,162,130,0.18)');
+        hi.addColorStop(1, 'rgba(92,162,130,0)');
+        c.fillStyle = hi;
+        c.fillRect(cx - rIn, cy - rIn, rIn * 2, rIn * 2);
+        const r = ctx.rng(41);
+        c.strokeStyle = 'rgba(10,40,28,0.15)';
+        c.lineWidth = 1.6;
+        c.beginPath();
+        for (let i = 0; i < 65; i++) {
+          const x = cx + (r() - 0.5) * rIn * 1.8;
+          const y = cy + (r() - 0.5) * rIn * 1.8;
+          const a = r() * 6.3, l = 4 + r() * 6;
+          c.moveTo(x, y); c.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+        }
+        c.stroke();
+        c.restore();
+      });
+    }
+
+    function dishPos(side) {
       return [
-        GT[0] + (side === 1 ? -1 : 1) * Math.round(590 * PAGE_SCALE),
-        GT[1] + Math.round((279 + 39) * PAGE_SCALE),
+        GT[0] + (side === 1 ? -1 : 1) * 742,
+        GT[1] + BOARD_Y_OFF,
       ];
+    }
+
+    function railLayout(n) {
+      const total = n * n;
+      const cols = total / 2;
+      const halfCols = cols / 2;
+      const colPitch = 52;
+      const rowPitch = 46;
+      const centerGap = 20;
+      const pipR = 20;
+      const wellR = 13.5;
+      const halfSpan = (halfCols - 0.5) * colPitch + centerGap * 0.5;
+      const innerHalfW = halfSpan + pipR + 14;
+      const outerHalfW = innerHalfW + 8;
+      const innerHalfH = rowPitch * 0.5 + pipR + 10;
+      const outerHalfH = innerHalfH + 8;
+      const wellPos = idx => {
+        const col = idx >> 1;
+        const row = idx & 1;
+        const x = (col - (halfCols - 0.5)) * colPitch + (col < halfCols ? -centerGap * 0.5 : centerGap * 0.5);
+        const y = row === 0 ? -rowPitch * 0.5 : rowPitch * 0.5;
+        return [x, y];
+      };
+      return { total, cols, halfCols, pipR, wellR, innerHalfW, outerHalfW, innerHalfH, outerHalfH, wellPos };
+    }
+
+    function bakeRailTex(n) {
+      const L = railLayout(n);
+      const pad = 16;
+      const W = Math.round((L.outerHalfW + pad) * 2);
+      const H = Math.round((L.outerHalfH + pad) * 2);
+      const cx = W * 0.5, cy = H * 0.5;
+      return ctx.shapeTex(W, H, b => {
+        B.paper(b, rrectPath(cx - L.outerHalfW, cy - L.outerHalfH, L.outerHalfW * 2, L.outerHalfH * 2, L.outerHalfH * 0.45), FELT_RIM, 0.42);
+        B.paper(b, rrectPath(cx - L.innerHalfW, cy - L.innerHalfH, L.innerHalfW * 2, L.innerHalfH * 2, L.innerHalfH * 0.40), FELT, 0.62);
+        for (let i = 0; i < L.total; i++) {
+          const p = L.wellPos(i);
+          B.paper(b, q => q.arc(cx + p[0], cy + p[1], L.wellR, 0, Math.PI * 2), FELT_WELL, 0.24);
+        }
+        // Middle mark separating the two halves (32 each on 8x8, 18 each on 6x6)
+        B.paper(b, rrectPath(cx - 3.5, cy - L.innerHalfH + 6, 7, L.innerHalfH * 2 - 12, 3.5), RAIL_MARK, 0.72);
+      });
+    }
+
+    function badgePos(side) {
+      const L = railLayout(st ? st.n : opt.size);
+      return [
+        GT[0] + (side === 1 ? -1 : 1) * Math.round(L.outerHalfW + 68),
+        RAIL_Y,
+      ];
+    }
+
+    function clearPips() {
+      for (const p of pipSprs) K.kill(p);
+      pipSprs = [];
     }
 
     function clearTrays() {
       for (const s of [1, 2]) {
-        if (traySpr[s]) { K.kill(traySpr[s]); traySpr[s] = null; }
+        if (dishSpr[s]) { K.kill(dishSpr[s]); dishSpr[s] = null; }
         if (badgeSpr[s]) { K.kill(badgeSpr[s]); badgeSpr[s] = null; }
-        for (const m of miniSprs[s]) K.kill(m);
-        miniSprs[s] = [];
       }
-      if (turnTabSpr) { K.kill(turnTabSpr); turnTabSpr = null; }
+      if (waitDiscSpr) { K.kill(waitDiscSpr); waitDiscSpr = null; }
+      if (railSpr) { K.kill(railSpr); railSpr = null; }
+      clearPips();
     }
 
     function buildTrays() {
       clearTrays();
+      if (!dishTex) dishTex = bakeDishTex();
+      const dishSz = Math.min(188, Math.round(sqSize() * 1.56));
       const cnt = logic.count(st);
       const counts = { 1: cnt.x, 2: cnt.o };
-      const bSz = Math.round(56 * PAGE_SCALE);
+      const bSz = Math.round(58 * PAGE_SCALE);
+      const L = railLayout(st.n);
+      const rTex = bakeRailTex(st.n);
+      railSpr = K.spr(rTex, {
+        x: GT[0], y: RAIL_Y,
+        w: Math.round((L.outerHalfW + 16) * 2),
+        h: Math.round((L.outerHalfH + 16) * 2),
+        z: 0.16, zr: 0.06, order: 28, own: true,
+      });
       for (const s of [1, 2]) {
+        const dp = dishPos(s);
+        dishSpr[s] = K.spr(dishTex, {
+          x: dp[0], y: dp[1], w: dishSz, h: dishSz,
+          z: 0.14, zr: 0.05, order: 28, own: false,
+        });
         const bp = badgePos(s);
         badgeSpr[s] = K.spr(K.badge(counts[s]), {
           x: bp[0], y: bp[1], w: bSz, h: bSz,
-          z: 0.25, zr: 0.06, order: 35, own: false,
+          z: 0.28, zr: 0.06, order: 35, own: false,
         });
       }
       syncTally(false);
+      updateTurnTab();
     }
 
     function syncTally() {
@@ -752,10 +896,35 @@
       for (const s of [1, 2]) {
         if (badgeSpr[s]) badgeSpr[s].tex = K.badge(counts[s]);
       }
+      clearPips();
+      if (!pipTex[1] || !pipTex[2]) return;
+      const L = railLayout(st.n);
+      const pSz = L.pipR * 2 * (32 / 25); // visual pip diameter = 2 * pipR (40 wu)
+      for (let i = 0; i < cnt.x && i < L.total; i++) {
+        const p = L.wellPos(i);
+        pipSprs.push(K.spr(pipTex[1], {
+          x: GT[0] + p[0], y: RAIL_Y + p[1], w: pSz, h: pSz,
+          z: 0.21, zr: 0.06, order: 32, own: false,
+        }));
+      }
+      for (let i = 0; i < cnt.o && i < L.total; i++) {
+        const p = L.wellPos(L.total - 1 - i);
+        pipSprs.push(K.spr(pipTex[2], {
+          x: GT[0] + p[0], y: RAIL_Y + p[1], w: pSz, h: pSz,
+          z: 0.21, zr: 0.06, order: 32, own: false,
+        }));
+      }
     }
 
     function updateTurnTab() {
-      if (turnTabSpr) { K.kill(turnTabSpr); turnTabSpr = null; }
+      if (waitDiscSpr) { K.kill(waitDiscSpr); waitDiscSpr = null; }
+      if (!st || st.over || !discTex[st.turn]) return;
+      const dp = dishPos(st.turn);
+      const sz = discWorldSize();
+      waitDiscSpr = K.spr(discTex[st.turn], {
+        x: dp[0], y: dp[1], w: sz, h: sz,
+        z: 0.24, zr: 0.12, order: 36, sx: 1, own: false,
+      });
     }
 
     // ---- Move Dots, Preview & Input (PRD 8.3) ----
@@ -766,8 +935,37 @@
 
     function ensureDotTex() {
       if (dotTex) { B.freeTex(dotTex); dotTex = null; }
-      dotTex = ctx.shapeTex(48, 48, b => {
-        B.paper(b, q => q.arc(24, 24, 16, 0, Math.PI * 2), FELT_DIMPLE, 0.28);
+      const S = 64, cx = 32, cy = 32, R = 22;
+      dotTex = ctx.shapeTex(S, S, b => {
+        // Subtle outer pressed rim and darker recessed felt pit
+        B.paper(b, q => q.arc(cx, cy, R + 3, 0, Math.PI * 2), '#255d45', 0.44);
+        B.paper(b, q => q.arc(cx, cy, R, 0, Math.PI * 2), '#174231', 0.14);
+        // Smooth concave height slope
+        const g = b.g;
+        g.save();
+        g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.clip();
+        const rg = g.createRadialGradient(cx, cy, R * 0.45, cx, cy, R);
+        rg.addColorStop(0, B.grey(0.12));
+        rg.addColorStop(1, B.grey(0.34));
+        g.fillStyle = rg;
+        g.fillRect(cx - R, cy - R, R * 2, R * 2);
+        g.restore();
+        // Soft directional inner shadow (top-left dark, bottom-right faint felt catchlight)
+        const c = b.c;
+        c.save();
+        c.beginPath(); c.arc(cx, cy, R, 0, Math.PI * 2); c.clip();
+        const sh = c.createRadialGradient(cx + 5, cy + 6, R * 0.42, cx + 3, cy + 4, R * 1.08);
+        sh.addColorStop(0, 'rgba(6,22,16,0)');
+        sh.addColorStop(0.65, 'rgba(6,22,16,0.22)');
+        sh.addColorStop(1, 'rgba(5,18,13,0.62)');
+        c.fillStyle = sh;
+        c.fillRect(cx - R, cy - R, R * 2, R * 2);
+        const hi = c.createRadialGradient(cx + 9, cy + 10, 2, cx + 9, cy + 10, R * 0.72);
+        hi.addColorStop(0, 'rgba(88,162,128,0.26)');
+        hi.addColorStop(1, 'rgba(88,162,128,0)');
+        c.fillStyle = hi;
+        c.fillRect(cx - R, cy - R, R * 2, R * 2);
+        c.restore();
       });
     }
 
@@ -780,13 +978,13 @@
       clearDots();
       if (!st || st.over || busyFlag || !opt.dots || isBotSide(st.turn)) return;
       const moves = logic.legal(st);
-      const sz = sqSize() * (0.085 * 2 / (16 / 24)); // dimple radius ~0.085 * sq (5.5 on 68 cell)
+      const sz = sqSize() * (0.145 * 2 / (22 / 32)); // quiet pressed dimple, radius ~0.145 * sq
       for (let i = 0; i < moves.length; i++) {
         const r = moves[i][0], c = moves[i][1];
         const p = sqCenter(r, c);
         const s = K.spr(dotTex, {
           x: p[0], y: p[1], w: sz, h: sz,
-          z: 0.31, zr: 0.02, order: 34, own: false,
+          z: 0.31, zr: 0.015, order: 34, own: false,
         });
         dotSprs.push({ r, c, s });
       }
@@ -1311,7 +1509,7 @@
         st = { n, grid: grid.slice(), turn: turn === 2 ? 2 : 1, over: false, winner: 0 };
         hist.clear();
         humanUndoCount = 0;
-        if (sizeChanged) buildBoard();
+        if (sizeChanged) { buildBoard(); buildTrays(); }
         syncDiscsFromState();
         syncTally(false);
         showTurnDisplay(st.turn, false);
