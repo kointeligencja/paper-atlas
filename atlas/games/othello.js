@@ -412,10 +412,56 @@
     let busyFlag = false;
     let destroyed = false;
 
+    const BOARD_GRID = 800;
+    const BOARD_HALF = BOARD_GRID * 0.5;
+    const BOARD_Y_OFF = 0;
+    const PAGE_SCALE = BOARD_GRID / 512;
+    const PAGE_COL = '#e2d3b5';
+
+    let page = null;
     let boardSpr = null;
     let lastPortrait = null;
 
     const hist = K.makeHist();
+
+    function clearPage() {
+      if (page) { page.destroy(); page = null; }
+    }
+
+    function ensurePage() {
+      K.hideMat();
+      if (page) return;
+      page = K.gamePage({
+        cx: GT[0],
+        cy: GT[1] + Math.round(39 * PAGE_SCALE),
+        w: Math.round(1354 * PAGE_SCALE),
+        h: Math.round(670 * PAGE_SCALE),
+        frameOrder: 6,
+        tableOrder: -20,
+      });
+      const IN = page.in;
+      const pw = IN.w + 38, ph = IN.h + 38;
+      const S = 0.75;
+      const tex = ctx.shapeTex(Math.round(pw * S), Math.round(ph * S), b => {
+        B.paper(b, q => q.rect(0, 0, pw * S, ph * S), PAGE_COL, 0.34);
+        const c = b.c, w = pw * S, h = ph * S;
+        c.save();
+        const edge = (x0, y0, x1, y1) => {
+          const g = c.createLinearGradient(x0, y0, x1, y1);
+          g.addColorStop(0, 'rgba(122, 92, 54, 0.22)');
+          g.addColorStop(0.55, 'rgba(122, 92, 54, 0.05)');
+          g.addColorStop(1, 'rgba(122, 92, 54, 0)');
+          c.fillStyle = g;
+          c.fillRect(0, 0, w, h);
+        };
+        edge(0, 0, 0, h * 0.14);
+        edge(0, h, 0, h * 0.86);
+        edge(0, 0, w * 0.08, 0);
+        edge(w, 0, w * 0.92, 0);
+        c.restore();
+      }, { noMip: true });
+      page.spr(tex, { x: IN.cx, y: IN.cy, w: pw, h: ph, z: 0.05, zr: 0.08, order: -5, own: true });
+    }
 
     function seatOf(side) { return side === 1 ? navySeat : (3 - navySeat); }
     function isBotSide(side) { return opt.players === 1 && seatOf(side) === 2; }
@@ -432,10 +478,13 @@
     }
 
     function isPortrait() { return ctx.asp() < 0.9; }
-    function sqSize() { return 800 / (st ? st.n : opt.size); }
+    function sqSize() { return BOARD_GRID / (st ? st.n : opt.size); }
     function sqCenter(r, c) {
       const sq = sqSize();
-      return [GT[0] - 400 + (c + 0.5) * sq, GT[1] - 400 + (r + 0.5) * sq];
+      return [
+        GT[0] - BOARD_HALF + (c + 0.5) * sq,
+        GT[1] + BOARD_Y_OFF - BOARD_HALF + (r + 0.5) * sq,
+      ];
     }
     function sqScreen(r, c) {
       const p = sqCenter(r, c);
@@ -443,138 +492,101 @@
       return [h[0] / 1000 * innerHeight, h[1] / 1000 * innerHeight];
     }
 
-    // Hand-cut rounded rectangle path
-    function roundedCutPath(x0, y0, x1, y1, rad, amp, seed) {
+    function rrectPath(x, y, w, h, rad) {
       return q => {
-        const r = Math.min(rad, (x1 - x0) * 0.45, (y1 - y0) * 0.45);
-        const seg = (ax, ay, bx, by, idx) => {
-          const steps = 6;
-          for (let i = 1; i <= steps; i++) {
-            const t = i / steps;
-            let px = ax + (bx - ax) * t;
-            let py = ay + (by - ay) * t;
-            if (i < steps) {
-              const nx = -(by - ay), ny = (bx - ax);
-              const nl = Math.hypot(nx, ny) || 1;
-              const j = (ctx.hs(idx * 17 + i, seed, 1) - 0.5) * amp;
-              px += (nx / nl) * j;
-              py += (ny / nl) * j;
-            }
-            q.lineTo(px, py);
-          }
-        };
-        q.moveTo(x0 + r, y0);
-        seg(x0 + r, y0, x1 - r, y0, 1);
-        q.quadraticCurveTo(x1, y0, x1, y0 + r);
-        seg(x1, y0 + r, x1, y1 - r, 2);
-        q.quadraticCurveTo(x1, y1, x1 - r, y1);
-        seg(x1 - r, y1, x0 + r, y1, 3);
-        q.quadraticCurveTo(x0, y1, x0, y1 - r);
-        seg(x0, y1 - r, x0, y0 + r, 4);
-        q.quadraticCurveTo(x0, y0, x0 + r, y0);
+        const r = Math.min(rad, w * 0.5, h * 0.5);
+        q.moveTo(x + r, y);
+        q.lineTo(x + w - r, y);
+        q.quadraticCurveTo(x + w, y, x + w, y + r);
+        q.lineTo(x + w, y + h - r);
+        q.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        q.lineTo(x + r, y + h);
+        q.quadraticCurveTo(x, y + h, x, y + h - r);
+        q.lineTo(x, y + r);
+        q.quadraticCurveTo(x, y, x + r, y);
         q.closePath();
       };
     }
 
+    const FELT = '#2f7256';
+    const FELT_RIM = '#215540';
+    const FELT_CUT = '#1f4f3c';
+    const FELT_DIMPLE = '#245f47';
+
     function bakeBoardTex(n) {
-      const W = 1800, H = 1800, PPU = 2; // 900x900 world units at 2 px/unit
-      const framePad = 8; // 4 world units outer margin inside canvas for hand-cut edge
-      const fx0 = framePad, fy0 = framePad, fx1 = W - framePad, fy1 = H - framePad;
-      const framePath = roundedCutPath(fx0, fy0, fx1, fy1, 24 * PPU, 4.5, 610 + n);
-      const feltX = 50 * PPU, feltY = 50 * PPU, feltW = 800 * PPU, feltH = 800 * PPU;
-      const sq = feltW / n;
+      const PPU = 1.5;
+      const pad = Math.round(44 * PAGE_SCALE);
+      const uw = BOARD_GRID + pad, uh = BOARD_GRID + pad;
+      const W = Math.round(uw * PPU), H = Math.round(uh * PPU);
+      const cx = W * 0.5, cy = H * 0.5;
+      const half = BOARD_HALF * PPU;
+      const cell = (BOARD_GRID / n) * PPU;
+      const ps = PAGE_SCALE * PPU;
 
       return ctx.shapeTex(W, H, b => {
-        // 1. Kraft frame (relief 0.90)
-        B.paper(b, framePath, '#cdb995', 0.90);
+        // 1. Outer felt rim (relief 0.42)
+        const rimPad = 16 * ps;
+        B.paper(b, rrectPath(cx - half - rimPad, cy - half - rimPad, (half + rimPad) * 2, (half + rimPad) * 2, 12 * ps), FELT_RIM, 0.42);
 
-        // 2. Sage green felt (800x800, relief 0.45)
-        B.paper(b, ctx.wob(feltX, feltY, feltX + feltW, feltY + feltH, 3.5, 631 + n), '#5e8f66', 0.45);
+        // 2. Inner green felt sheet (relief 0.62)
+        const inPad = 9 * ps;
+        B.paper(b, rrectPath(cx - half - inPad, cy - half - inPad, (half + inPad) * 2, (half + inPad) * 2, 8 * ps), FELT, 0.62);
 
-        // 3. Stitched cream grid lines (colour only, no relief)
+        // 3. Subtle felt fibres (colour only)
+        const r = ctx.rng(5 + n);
         const c = b.c;
         c.save();
-        c.strokeStyle = PAP[0];
-        c.globalAlpha = 0.85;
-        c.lineWidth = 3 * PPU;
-        c.lineCap = 'round';
-        c.setLineDash([14 * PPU, 8 * PPU]);
-        for (let i = 1; i < n; i++) {
-          const x = feltX + i * sq;
-          c.beginPath();
-          c.moveTo(x, feltY + 6 * PPU);
-          c.lineTo(x, feltY + feltH - 6 * PPU);
-          c.stroke();
-          const y = feltY + i * sq;
-          c.beginPath();
-          c.moveTo(feltX + 6 * PPU, y);
-          c.lineTo(feltX + feltW - 6 * PPU, y);
-          c.stroke();
+        c.strokeStyle = 'rgba(10,40,28,0.16)';
+        c.lineWidth = 1.2 * ps;
+        c.beginPath();
+        for (let i = 0; i < 900; i++) {
+          const x = cx + (r() - 0.5) * half * 2;
+          const y = cy + (r() - 0.5) * half * 2;
+          const a = r() * 6.3, l = (3 + r() * 5) * ps;
+          c.moveTo(x, y);
+          c.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
         }
+        c.stroke();
         c.restore();
 
-        // 4. Four corner cream pencil stars (radius 0.14 of a square, colour only)
-        const starR = 0.14 * sq;
-        const corners = [[0, 0], [0, n - 1], [n - 1, 0], [n - 1, n - 1]];
-        c.save();
-        c.fillStyle = PAP[0];
-        c.globalAlpha = 0.65;
-        for (const [cr, cc] of corners) {
-          const sx = feltX + (cc + 0.5) * sq;
-          const sy = feltY + (cr + 0.5) * sq;
-          c.beginPath();
-          ctx.starPath(sx, sy, starR, starR * 0.45)(c);
-          c.fill();
+        // 4. Cut grid lines (colour + depressed relief, works for 6x6 and 8x8)
+        for (const [q, col] of [[b.c, FELT_CUT], [b.g, B.grey(0.34)]]) {
+          q.save();
+          q.strokeStyle = col;
+          q.lineWidth = 2.4 * ps;
+          q.beginPath();
+          for (let i = 0; i <= n; i++) {
+            const v = -half + i * cell;
+            q.moveTo(cx + v, cy - half);
+            q.lineTo(cx + v, cy + half);
+            q.moveTo(cx - half, cy + v);
+            q.lineTo(cx + half, cy + v);
+          }
+          q.stroke();
+          q.restore();
         }
-        c.restore();
-
-        // 5. Four photo corners on the frame (PAP[5] ochre, legs 70 units, relief 0.97)
-        const leg = 70 * PPU;
-        b.c.save(); b.g.save();
-        b.c.beginPath(); framePath(b.c); b.c.clip();
-        b.g.beginPath(); framePath(b.g); b.g.clip();
-        const triCorners = [
-          [[fx0, fy0], [fx0 + leg, fy0], [fx0, fy0 + leg]],
-          [[fx1, fy0], [fx1 - leg, fy0], [fx1, fy0 + leg]],
-          [[fx0, fy1], [fx0 + leg, fy1], [fx0, fy1 - leg]],
-          [[fx1, fy1], [fx1 - leg, fy1], [fx1, fy1 - leg]],
-        ];
-        for (const pts of triCorners) {
-          B.paper(b, q => {
-            q.moveTo(pts[0][0], pts[0][1]);
-            q.lineTo(pts[1][0], pts[1][1]);
-            q.lineTo(pts[2][0], pts[2][1]);
-            q.closePath();
-          }, PAP[5], 0.97);
-        }
-        b.c.restore(); b.g.restore();
       });
     }
 
     function buildBoard() {
       if (boardSpr) { K.kill(boardSpr); boardSpr = null; }
       const tex = bakeBoardTex(st.n);
+      const uw = BOARD_GRID + Math.round(44 * PAGE_SCALE);
       boardSpr = K.spr(tex, {
-        x: GT[0], y: GT[1], w: 900, h: 900,
-        z: 0.10, zr: 0.20, order: 30, own: true,
+        x: GT[0], y: GT[1] + BOARD_Y_OFF, w: uw, h: uw,
+        z: 0.30, zr: 0.10, order: 30, own: true,
       });
     }
 
     function frameCamera(immediate) {
-      const portrait = isPortrait();
-      lastPortrait = portrait;
-      const topM = (ctx.topHudBottom() + 10) / 1000;
-      let box, mar;
-      if (portrait) {
-        box = [GT[0] - 480, GT[1] - 660, GT[0] + 480, GT[1] + 660];
-        mar = { l: 0.02, r: 0.02, t: topM, b: 0.03 };
-      } else if (ctx.PHONE) {
-        box = [GT[0] - 720, GT[1] - 455, GT[0] + 720, GT[1] + 455];
-        mar = { l: 0.02, r: 0.02, t: topM, b: 0.015 };
-      } else {
-        box = [GT[0] - 720, GT[1] - 480, GT[0] + 720, GT[1] + 480];
-        mar = { l: 0.02, r: 0.02, t: topM, b: 0.03 };
+      lastPortrait = isPortrait();
+      if (page) {
+        page.fitCam(immediate);
+        return;
       }
+      const topM = (ctx.topHudBottom() + 10) / 1000;
+      const box = [GT[0] - 720, GT[1] - 480, GT[0] + 720, GT[1] + 480];
+      const mar = { l: 0.02, r: 0.02, t: topM, b: 0.03 };
       const f = ctx.fitCam(box, mar, 0, false);
       if (immediate || K.fast) {
         ctx.killTw(ctx.cam);
@@ -600,34 +612,44 @@
       }
     }
 
+    const DISC_DARK = '#1b1b1f';
+    const DISC_DARK_FACE = '#2e2e33';
+    const DISC_DARK_UNDER = '#f1ece0';
+    const DISC_LIGHT = '#e6dfcd';
+    const DISC_LIGHT_FACE = '#f6f1e4';
+    const DISC_LIGHT_UNDER = '#232327';
+
     function bakeDiscTex(side, look) {
-      const S = 200, cx = S / 2, cy = S / 2, R = 90;
-      const base = side === 1 ? PAP[10] : PAP[0];
-      const rim = ctx.shade(base, side === 1 ? -0.22 : -0.14);
+      const S = 200, cx = S / 2, cy = S / 2, R = 86;
+      const body = side === 1 ? DISC_DARK : DISC_LIGHT;
+      const face = side === 1 ? DISC_DARK_FACE : DISC_LIGHT_FACE;
+      const under = side === 1 ? DISC_DARK_UNDER : DISC_LIGHT_UNDER;
       return ctx.shapeTex(S, S, b => {
-        B.paper(b, q => q.arc(cx, cy, R, 0, Math.PI * 2), rim, 0.78);
-        B.paper(b, q => q.arc(cx, cy, R - 9, 0, Math.PI * 2), base, 0.80);
+        // Opposite-side paper glued underneath, offset slightly so the other face peeks out as a rim
+        B.paper(b, q => q.arc(cx + 2, cy + 4, R, 0, Math.PI * 2), under, 0.45);
+        // Main bevelled disc edge
+        B.paper(b, q => q.arc(cx, cy, R - 4, 0, Math.PI * 2), body, 0.72);
+        // Raised inner face
+        B.paper(b, q => q.arc(cx, cy, R - 14, 0, Math.PI * 2), face, 0.86);
         if (look === 'sunmoon') {
           if (side === 2) {
-            // 12-ray embossed sun (relief +0.12)
-            const sunCol = ctx.shade(PAP[0], -0.05);
-            const rel = 0.92;
-            B.paper(b, q => q.arc(cx, cy, 22, 0, Math.PI * 2), sunCol, rel);
+            const sunCol = ctx.shade(DISC_LIGHT, -0.05);
+            const rel = 0.94;
+            B.paper(b, q => q.arc(cx, cy, 20, 0, Math.PI * 2), sunCol, rel);
             for (let i = 0; i < 12; i++) {
               const a = (i / 12) * Math.PI * 2;
               const aL = a - 0.14, aR = a + 0.14;
               B.paper(b, q => {
-                q.moveTo(cx + Math.cos(a) * 56, cy + Math.sin(a) * 56);
-                q.lineTo(cx + Math.cos(aL) * 28, cy + Math.sin(aL) * 28);
-                q.lineTo(cx + Math.cos(aR) * 28, cy + Math.sin(aR) * 28);
+                q.moveTo(cx + Math.cos(a) * 52, cy + Math.sin(a) * 52);
+                q.lineTo(cx + Math.cos(aL) * 26, cy + Math.sin(aL) * 26);
+                q.lineTo(cx + Math.cos(aR) * 26, cy + Math.sin(aR) * 26);
                 q.closePath();
               }, sunCol, rel);
             }
           } else {
-            // Embossed crescent moon (relief +0.12)
-            const moonCol = ctx.shade(PAP[10], 0.12);
-            const rel = 0.92;
-            const R1 = 42, R2 = 35, dx = 18;
+            const moonCol = ctx.shade(DISC_DARK_FACE, 0.14);
+            const rel = 0.94;
+            const R1 = 40, R2 = 33, dx = 17;
             const ix = (R1 * R1 - R2 * R2 + dx * dx) / (2 * dx);
             const iy = Math.sqrt(Math.max(1, R1 * R1 - ix * ix));
             const t1 = Math.atan2(iy, ix);
@@ -654,8 +676,8 @@
     }
 
     function discWorldSize() {
-      // Disc radius is 90/100 of half texture; target radius = 0.39 * sq
-      return sqSize() * (0.39 * 2 / 0.90);
+      // Visual radius is 86/100 of half texture; target radius = 0.39 * sq
+      return sqSize() * (0.39 * 2 / 0.86);
     }
 
     function clearDiscs() {
@@ -672,7 +694,7 @@
       const sz = discWorldSize();
       return K.spr(discTex[side], Object.assign({
         x: p[0], y: p[1], w: sz, h: sz,
-        z: 0.21, zr: 0.10, order: 40, sx: 1, own: false,
+        z: 0.36, zr: 0.14, order: 40, sx: 1, own: false,
       }, extra || {}));
     }
 
@@ -691,19 +713,11 @@
       }
     }
 
-    function trayPos(side) {
-      if (isPortrait()) return [GT[0], GT[1] + (side === 1 ? -560 : 560)];
-      return [GT[0] + (side === 1 ? -610 : 610), GT[1]];
-    }
-
-    function miniPos(side, idx) {
-      const tp = trayPos(side);
-      if (isPortrait()) {
-        const col = idx % 8, row = (idx / 8) | 0;
-        return [tp[0] - 90 + col * 36, tp[1] + (row - 1.5) * 29];
-      }
-      const col = idx % 4, row = (idx / 4) | 0;
-      return [tp[0] + (col - 1.5) * 29, tp[1] - 100 + row * 36];
+    function badgePos(side) {
+      return [
+        GT[0] + (side === 1 ? -1 : 1) * Math.round(590 * PAGE_SCALE),
+        GT[1] + Math.round((279 + 39) * PAGE_SCALE),
+      ];
     }
 
     function clearTrays() {
@@ -718,75 +732,30 @@
 
     function buildTrays() {
       clearTrays();
-      const portrait = isPortrait();
-      const tw = portrait ? 420 : 150;
-      const th = portrait ? 150 : 420;
       const cnt = logic.count(st);
       const counts = { 1: cnt.x, 2: cnt.o };
+      const bSz = Math.round(56 * PAGE_SCALE);
       for (const s of [1, 2]) {
-        const tp = trayPos(s);
-        const tex = ctx.shapeTex(tw * 2, th * 2, b => {
-          B.paper(b, roundedCutPath(6, 6, tw * 2 - 6, th * 2 - 6, 20, 4, 710 + s), '#cdb995', 0.55);
-        });
-        traySpr[s] = K.spr(tex, {
-          x: tp[0], y: tp[1], w: tw, h: th,
-          z: 0.08, zr: 0.10, order: 25, own: true,
-        });
-        const bx = portrait ? tp[0] - 160 : tp[0];
-        const by = portrait ? tp[1] : tp[1] - 158;
+        const bp = badgePos(s);
         badgeSpr[s] = K.spr(K.badge(counts[s]), {
-          x: bx, y: by, w: 60, h: 60,
-          z: 0.14, zr: 0.06, order: 35, own: false,
+          x: bp[0], y: bp[1], w: bSz, h: bSz,
+          z: 0.25, zr: 0.06, order: 35, own: false,
         });
-        miniSprs[s] = [];
       }
       syncTally(false);
-      updateTurnTab();
     }
 
-    function syncTally(animate) {
+    function syncTally() {
       if (!st) return;
       const cnt = logic.count(st);
       const counts = { 1: cnt.x, 2: cnt.o };
-      const miniSz = 28; // radius ~12.6 at 0.90 fill — fits 4x8 / 8x4 cleanly inside tray
       for (const s of [1, 2]) {
         if (badgeSpr[s]) badgeSpr[s].tex = K.badge(counts[s]);
-        const want = Math.min(32, Math.ceil(counts[s] / 2));
-        const arr = miniSprs[s];
-        while (arr.length < want) {
-          const mp = miniPos(s, arr.length);
-          const m = K.spr(discTex[s], {
-            x: mp[0], y: mp[1], w: miniSz, h: miniSz,
-            z: 0.15, zr: 0.06, order: 36,
-            lift: (animate && !K.fast) ? 0.35 : 0, own: false,
-          });
-          if (animate && !K.fast) K.tw(m, { lift: 0 }, 2 / 12, { cut: true });
-          arr.push(m);
-        }
-        while (arr.length > want) {
-          const m = arr.pop();
-          if (animate && !K.fast) {
-            K.tw(m, { lift: 0.35 }, 2 / 12, { cut: true, done: () => K.kill(m) });
-          } else {
-            K.kill(m);
-          }
-        }
       }
     }
 
     function updateTurnTab() {
       if (turnTabSpr) { K.kill(turnTabSpr); turnTabSpr = null; }
-      if (!st || st.over) return;
-      const side = st.turn;
-      const tp = trayPos(side);
-      const portrait = isPortrait();
-      const tx = portrait ? GT[0] + 328 : tp[0];
-      const ty = portrait ? tp[1] : tp[1] + 252;
-      turnTabSpr = K.worldTab('Your turn', tx, ty, {
-        colr: side === 1 ? PAP[10] : PAP[0],
-        ink: side === 1 ? CREAM : INK,
-        px: 30, z: 0.16, order: 45, s: 1,
-      });
     }
 
     // ---- Move Dots, Preview & Input (PRD 8.3) ----
@@ -797,15 +766,8 @@
 
     function ensureDotTex() {
       if (dotTex) { B.freeTex(dotTex); dotTex = null; }
-      dotTex = ctx.shapeTex(64, 64, b => {
-        B.paper(b, q => q.arc(32, 32, 26, 0, Math.PI * 2), '#4b7553', 0.2);
-        const c = b.c;
-        c.save();
-        c.fillStyle = 'rgba(42,42,48,0.55)';
-        c.beginPath();
-        c.arc(32, 32, 21, 0, Math.PI * 2);
-        c.fill();
-        c.restore();
+      dotTex = ctx.shapeTex(48, 48, b => {
+        B.paper(b, q => q.arc(24, 24, 16, 0, Math.PI * 2), FELT_DIMPLE, 0.28);
       });
     }
 
@@ -818,13 +780,13 @@
       clearDots();
       if (!st || st.over || busyFlag || !opt.dots || isBotSide(st.turn)) return;
       const moves = logic.legal(st);
-      const sz = sqSize() * (0.09 * 2 / (21 / 32)); // pencil dot radius = 0.09 * sq
+      const sz = sqSize() * (0.085 * 2 / (16 / 24)); // dimple radius ~0.085 * sq (5.5 on 68 cell)
       for (let i = 0; i < moves.length; i++) {
         const r = moves[i][0], c = moves[i][1];
         const p = sqCenter(r, c);
         const s = K.spr(dotTex, {
           x: p[0], y: p[1], w: sz, h: sz,
-          z: 0.14, zr: 0.04, order: 34, own: false,
+          z: 0.31, zr: 0.02, order: 34, own: false,
         });
         dotSprs.push({ r, c, s });
       }
@@ -891,8 +853,8 @@
       if (!st || st.over || busyFlag || isBotSide(st.turn) || !p || !p.w) return null;
       const wx = p.w[0], wy = p.w[1];
       const sq = sqSize(), n = st.n;
-      const c = Math.floor((wx - (GT[0] - 400)) / sq);
-      const r = Math.floor((wy - (GT[1] - 400)) / sq);
+      const c = Math.floor((wx - (GT[0] - BOARD_HALF)) / sq);
+      const r = Math.floor((wy - (GT[1] + BOARD_Y_OFF - BOARD_HALF)) / sq);
       if (r >= 0 && r < n && c >= 0 && c < n && logic.flips(st, r, c).length > 0) {
         return { r, c };
       }
@@ -916,8 +878,8 @@
       if (!st || st.over || busyFlag || isBotSide(st.turn) || !p || !p.w) return;
       const wx = p.w[0], wy = p.w[1];
       const sq = sqSize(), n = st.n;
-      const c = Math.floor((wx - (GT[0] - 400)) / sq);
-      const r = Math.floor((wy - (GT[1] - 400)) / sq);
+      const c = Math.floor((wx - (GT[0] - BOARD_HALF)) / sq);
+      const r = Math.floor((wy - (GT[1] + BOARD_Y_OFF - BOARD_HALF)) / sq);
       if (r < 0 || r >= n || c < 0 || c >= n) return;
       if (st.grid[r][c] !== '.') return; // occupied square -> nothing
       K.snd.nope();
@@ -1190,7 +1152,7 @@
       busyFlag = false;
       hist.clear();
       humanUndoCount = 0;
-      K.ensureMat();
+      ensurePage();
       ensureDiscTextures();
       ensureDotTex();
       buildBoard();
@@ -1242,7 +1204,7 @@
     }
     function layoutHud() {
       if (!st || destroyed) return;
-      K.ensureMat();
+      ensurePage();
       const pNow = isPortrait();
       if (pNow !== lastPortrait) buildTrays();
       frameCamera(true);
@@ -1254,7 +1216,8 @@
     }
     function rebake() {
       if (!st || destroyed) return;
-      K.ensureMat();
+      clearPage();
+      ensurePage();
       ensureDiscTextures();
       ensureDotTex();
       buildBoard();
@@ -1311,6 +1274,7 @@
       clearDiscs();
       clearTrays();
       if (boardSpr) { K.kill(boardSpr); boardSpr = null; }
+      clearPage();
       freeDiscTex();
       if (dotTex) { B.freeTex(dotTex); dotTex = null; }
       K.closeNote(true);
