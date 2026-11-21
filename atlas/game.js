@@ -81,6 +81,7 @@
   const devPerHud = () => Math.max(0.5, B.size()[1] / 1000);
   // ---------- state ----------
   let T = 0, frame = 0; const S = []; const tweens = []; let timers = [];
+  let GM = null; // games: the Game Box controller (atlas/games/box.js), null when the games scripts are missing
   const cam = { x: 1000, y: 487, h: 1160 }; let asp = innerWidth / innerHeight;
   const spr = (tex, o) => { const s = Object.assign({ tex, x: 0, y: 0, w: tex ? tex.w : 1, h: tex ? tex.h : 1, rot: 0, sc: 1, z: 0.2, zr: 0.03, lift: 0, hud: false, alpha: 1, reveal: 1, wake: -1, glow: 0, cells: 7, seed: R0() * 50, order: 10, flut: 0 }, o); S.push(s); return s; };
   const kill = s => { const i = S.indexOf(s); if (i >= 0) S.splice(i, 1); if (s && s.own) { s.own = false; B.freeTex(s.tex); } };
@@ -230,7 +231,7 @@
             if (!p || !TOKENS.includes(p.token) || seenTok.has(p.token) || store.players.length >= 6) continue;
             seenTok.add(p.token);
             const mp = migrateProg(p.prog); if (mp.changed || !p.level) migrated = true;
-            store.players.push({ id: String(p.id || nextId()), token: p.token, name: cleanName(p.name), level: cleanLevel(p.level), prog: mp.prog, rec: cleanRec(p.rec), passShown: cleanPassShown(p.passShown), created: Number(p.created) || Date.now(), mail: cleanMail(p.mail) }); // air mail: mail kept
+            store.players.push({ id: String(p.id || nextId()), token: p.token, name: cleanName(p.name), level: cleanLevel(p.level), prog: mp.prog, rec: cleanRec(p.rec), passShown: cleanPassShown(p.passShown), created: Number(p.created) || Date.now(), mail: cleanMail(p.mail), games: window.PAPER_GAMES && window.PAPER_GAMES.cleanSave ? window.PAPER_GAMES.cleanSave(p.games) : p.games }); // air mail: mail kept // games
           }
           store.current = store.players.some(p => p.id === d.current) ? d.current : null;
           if (migrated) save();
@@ -715,7 +716,7 @@
   // game says (title, hint line); coloured paper for what a child can tap (buttons). Each strip lies a little askew, no two alike, at
   // most 2 degrees. The player token stays whole during a round: a tap on it only wobbles it (2-3 frames at 12 fps).
   const HUD_PAPER = '#f3eee2', DEG = Math.PI / 180;
-  const HUD_TILT = { title: -1.3, hint: -0.45, token: -1.8, sound: 1.4, passport: -0.85, world: 1.1, hintBtn: -1.55, undo: 0.3, zoomOut: 1.8, zoomIn: -0.6 };
+  const HUD_TILT = { title: -1.3, hint: -0.45, token: -1.8, sound: 1.4, passport: -0.85, world: 1.1, hintBtn: -1.55, undo: 0.3, zoomOut: 1.8, zoomIn: -0.6, games: -1.0 }; // games
   const BTN_INK = { undo: CREAM, zoomIn: CREAM, zoomOut: CREAM };
   let hintS = null, hintTxt = '', lastHudDevH = B.size()[1];
   const titleTex = sc => textTex('The paper atlas', 58 * 0.9, { strip: HUD_PAPER, col: INK, cut: true, scale: sc, noMip: true });
@@ -772,7 +773,8 @@
   const isZoomedIn = () => (mode === 'map' && playerLevel() === 'own' && RD && RD.baseCam && cam.h < RD.baseCam.h - 2) || (mode === 'world' && twins.length > 0 && cam.h < worldFrame().h - 2);
   // the camera can be zoomed: "On my own" during a map round, and the world view while pieces are lifted for a size comparison
   const zoomable = () => !attract && !picker && !passport && ((mode === 'map' && playerLevel() === 'own' && !!RD && !RD.auto) || (mode === 'world' && twins.length > 0));
-  const btnOn = id => id === 'mail' ? amBtnOn() : isZoomBtn(id) ? zoomable() : // air mail
+  const btnOn = id => id === 'games' ? (GM ? GM.btnOn() : false) : id === 'mail' ? (!GM && amBtnOn()) : // games: the Games button replaces Air Mail when the box is loaded
+    isZoomBtn(id) ? zoomable() : // air mail
     id === 'sound' || (id === 'passport' ? (mode === 'world' && !attract && !picker && (!!currentPlayer() || Q.get('done') === 'all')) : (mode === 'wind' ? id === 'world' : mode !== 'world'));
   // the + and - buttons: in the top bar, just left of the other buttons (the only place that is never over the map, the flag column or a
   // waiting piece: a round of six flags fills the column to the bottom at 800x560); never scaled below 44 px
@@ -783,6 +785,7 @@
     [['zoomOut', x1 - zs * 1.5 - ZGAP], ['zoomIn', x1 - zs / 2]].forEach(([id, x]) => { const s = btn[id], on = btnOn(id); s.alpha = on ? 1 : 0; s.w = s.bw; s.h = s.bh; s.x = x; s.y = y; s.rail = portrait; s.rot = s.tilt + wobbleRot(s); });
   }
   function layoutHud() {
+    if (GM && mode === 'games') { GM.layoutHud(); return; } // games
     if (mode === 'mail') { amLayoutHud(); return; } // air mail
     const W = 1000 * asp, hasP = !!currentPlayer();
     playerBtn.alpha = hasP ? 1 : 0;
@@ -798,7 +801,7 @@
       title.x = pad + title.w / 2; title.y = 20 + title.h / 2;
       playerBtn.w = playerBtn.bw * ts; playerBtn.h = playerBtn.bh * ts;
       playerBtn.x = title.x + title.w / 2 + tGap * ts + playerBtn.w / 2; playerBtn.y = title.y;
-      const ids = ['undo', 'hint', 'world', 'mail', 'passport', 'sound']; // air mail
+      const ids = ['undo', 'hint', 'world', 'games', 'mail', 'passport', 'sound']; // air mail // games
       const vis = ids.filter(btnOn);
       const gap = 10, rawW = vis.reduce((a, id) => a + btn[id].bw, 0) + gap * Math.max(0, vis.length - 1);
       const bs = Math.min(1, maxW / Math.max(1, rawW));
@@ -820,7 +823,7 @@
       title.alpha = 0;
       const padX = 24, gap = 14, zGapOut = 18;
       playerBtn.w = playerBtn.bw; playerBtn.h = playerBtn.bh;
-      const ids = ['sound', 'passport', 'mail', 'world', 'hint', 'undo']; // air mail
+      const ids = ['sound', 'passport', 'games', 'mail', 'world', 'hint', 'undo']; // air mail // games
       const vis = ids.filter(btnOn);
       const hasZ = btnOn('zoomIn');
       const zW = hasZ ? zoomBtnHud() * 2 + ZGAP + zGapOut : 0;
@@ -864,7 +867,7 @@
     playerBtn.w = playerBtn.bw; playerBtn.h = playerBtn.bh;
     playerBtn.x = title.x + title.w / 2 + 14 + playerBtn.w / 2; playerBtn.y = PHONE ? Math.max(title.y, 12 + playerBtn.h / 2) : title.y;
     if (hintS) { hintS.w = hintS.bw; hintS.h = hintS.bh; hintS.x = 34 + hintS.w / 2; hintS.y = (PHONE && hasP ? Math.max(title.y + title.h / 2, playerBtn.y + playerBtn.h / 2) : title.y + title.h / 2) + 8 + hintS.h / 2; }
-    const ids = ['sound', 'passport', 'mail', 'world', 'hint', 'undo']; // air mail
+    const ids = ['sound', 'passport', 'games', 'mail', 'world', 'hint', 'undo']; // air mail // games
     const vis = ids.filter(btnOn);
     const leftLim = (hasP ? playerBtn.x + playerBtn.w / 2 : title.x + title.w / 2) + 20;
     const zW = btnOn('zoomIn') ? zoomBtnHud() * 2 + ZGAP + 22 : 0;
@@ -1025,6 +1028,7 @@
   }
   function rebakeFonts() {
     B.resize();
+    if (GM && mode === 'games') GM.rebake(); // games
     lastHudDevH = B.size()[1];
     const sc = devPerHud();
     B.freeTex(title.tex); const tt = titleTex(sc); title.tex = tt; title.bw = title.w = tt.lw; title.bh = title.h = tt.lh;
@@ -1762,6 +1766,7 @@
   function snapWorldCam() { killTw(cam); const k = worldFrame(); cam.x = k.x; cam.y = k.y; cam.h = k.h; }
   function goWorld(d) {
     if (mode === 'mail') amExit(); // air mail
+    if (GM && mode === 'games') GM.exit(); // games
     mode = 'world'; setView(null); allStars = false;
     idleTime = 0; timers = timers.filter(t => t.tag !== 'cmpHint');
     clearStars(); clearTags(); clearCompareTag(false);
@@ -4257,6 +4262,7 @@
     if (picker) { handlePickerDown(p, e); return; }
     if (passport) { handlePassportDown(p); return; }
     if (mode === 'mail') { amDown(e, p); return; } // air mail
+    if (GM && mode === 'games') { GM.down(e, p); return; } // games
     if (needFirstPick) { needFirstPick = false; openPicker('pick'); return; }
     if (activePtrs.size >= 2 && ((mode === 'map' && playerLevel() === 'own' && RD && !drag) || (mode === 'world' && twins.length > 0 && !twinDrag))) {
       pan = null; mapTap = null; worldTap = null;
@@ -4354,6 +4360,7 @@
   }
   function onMove(e) {
     if (mode === 'mail') { amMove(e); return; } // air mail
+    if (GM && mode === 'games') { GM.move(e); return; } // games
     if (drag && e.pointerId !== drag.id) return;
     if (twinDrag && e.pointerId !== twinDrag.id) return;
     if (hold && e.pointerId !== hold.id) return;
@@ -4456,6 +4463,7 @@
     idleTime = 0;
     activePtrs.delete(e.pointerId);
     if (mode === 'mail') { amUp(e); return; } // air mail
+    if (GM && mode === 'games') { GM.up(e); return; } // games
     if (pinch && (e.pointerId === pinch.id0 || e.pointerId === pinch.id1)) { pinch = null; }
     if (drag && e.pointerId !== drag.id) return;
     if (twinDrag && e.pointerId !== twinDrag.id) return;
@@ -4568,6 +4576,7 @@
   function showGhost() { const s = RD.piece; if (!s || RD.ghost) return; const g = spr(s.tex, { x: s.tp.x, y: s.tp.y, w: s.w, h: s.h, sc: s.tp.sc, z: 0.19, zr: 0.02, order: 19 + 30, alpha: 0.4, tint: [1.25, 1.2, 1.05] }); g.ghost = T; RD.ghost = g; RD.tmp.push(g); after(3, () => { kill(g); if (RD) RD.ghost = null; }, 'rd'); }
   function press(id) {
     if (id === 'mail') { amEnter(); return; } // air mail
+    if (id === 'games') { if (GM) GM.press(); return; } // games
     if (id === 'sound') {
       if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { } }
       soundOn = !soundOn;
@@ -4624,6 +4633,7 @@
       return;
     }
     if (id === 'undo') {
+      if (GM && mode === 'games') { GM.undo(); return; } // games
       if (mode === 'flags' && RD.hist.length) {
         const s = RD.hist.pop(); s.placed = false; sfx.back(); tw(s, { x: s.hx, y: s.hy, rot: s.hr, sc: s.ts }, 0.4, { cut: true });
       } else if (mode === 'map' && RD.placed.length && !RD.auto) {
@@ -5564,7 +5574,7 @@
     playerBtn.alpha = hasP ? 1 : 0;
     title.rot = title.tilt; playerBtn.rot = playerBtn.tilt + wobbleRot(playerBtn); if (hintS) hintS.rot = hintS.tilt;
     const hintOn = !!AM.letter && !AM.delivered && !AM.box && !(AM.card && AM.card.kind === 'story'); // the Hint button shows during a letter
-    for (const id of ['passport', 'undo', 'zoomOut', 'zoomIn', 'mail'].concat(hintOn ? [] : ['hint'])) btn[id].alpha = 0;
+    for (const id of ['passport', 'undo', 'zoomOut', 'zoomIn', 'mail', 'games'].concat(hintOn ? [] : ['hint'])) btn[id].alpha = 0;
     const mIds = hintOn ? ['mailMap', 'world', 'hint', 'sound'] : ['mailMap', 'world', 'sound'], mRight = hintOn ? ['sound', 'world', 'mailMap', 'hint'] : ['sound', 'world', 'mailMap'];
     for (const id of mIds) btn[id].rot = btn[id].tilt + wobbleRot(btn[id]);
     if (asp < 0.9) {
@@ -6147,8 +6157,34 @@
   mkBtn('mailMap', 'Whole map', PAP[6]); btn.mailMap.alpha = 0; // air mail
   // ---------- end air mail ----------
 
+  // ---------- games: the bridge to atlas/games/*.js (audit/PRD_games.md 2.2) ----------
+  BTN_IDS.push('games'); mkBtn('games', 'Games', PAP[8]); btn.games.alpha = 0; // games
+  const ctx = { // games
+    Q, GEO: G, C, CONTS, CI, FL, PAP, CAP, TOKENS, FONT, PHONE, DEG,
+    BLACK, CREAM, INK, SEA, PALE, HUD_PAPER, TERR_PAPER,
+    GFX: B, S, spr, kill, killTw, tw, after,
+    clearTimers: tag => { timers = timers.filter(t => t.tag !== tag); },
+    now: () => T,
+    asp: () => asp, cam, camTo, fitCam, worldFrame, contFrame, ensureBase,
+    w2h, h2w, toW, devPerHud, uiK, edgeHud, hudPx, worldPx, topHudBottom,
+    shapeTex, textTex, cutEdge, wob, ring, starPath, mkRibbonPath, spotTex, starTex,
+    drawToken, tokTex, playerBtnTex, flagTex, flagDraw: amFlagDraw, postmarkDraw: amPostmarkDraw, ink: amInk, wrap: amWrap,
+    sentences: amSentences, shade, rng, hs, sid, clamp, lerp,
+    pipPolys, polyArea, countryAt,
+    title, playerBtn, btn, mkBtn, setHint, layoutHud, updateHudToken, startWobble, wobbleRot,
+    hit, hitMin, pickHit, hint: () => hintS,
+    tone, noise, sfx, soundOn: () => soundOn, audio: () => AC,
+    speakText, speakCountry, speakPhrases: enqueuePhrase, stopSpeech,
+    store: () => store, currentPlayer, playerLevel, prog: () => prog, isBuiltId, save, inSent, normSaint,
+    mode: () => mode, setMode: m => { mode = m; }, goWorld, press, amEnter,
+    attract: () => attract, pickerOpen: () => !!picker, passportOpen: () => !!passport,
+    sendAllTwinsHome, clearTags, clearStars, clearCompareTag,
+  };
+  if (window.PAPER_GAMES && window.PAPER_GAMES.boot) { try { GM = window.PAPER_GAMES.boot(ctx); } catch (err) { console.error('games: boot failed', err); GM = null; } } // games
+
   // ---------- update ----------
   function update(dt) {
+    if (GM && mode === 'games') GM.update(dt); // games
     T += dt; const F = Math.floor(T * 12), tq = F / 12;
     for (let i = 0; i < timers.length; i++) if (timers[i].t <= T) { const t = timers.splice(i, 1)[0]; i--; t.fn(); }
     for (let i = 0; i < tweens.length; i++) { const t = tweens[i]; const now = t.sm ? T : tq + 1 / 12; if (now < t.t0) continue; if (!t.from) { t.from = {}; for (const k in t.to) t.from[k] = t.o[k]; } const u = clamp((now - t.t0) / t.dur, 0, 1), e = ease(u); for (const k in t.to) t.o[k] = lerp(t.from[k], t.to[k], e); if (u >= 1) { tweens.splice(i, 1); i--; if (t.done) t.done(); } }
@@ -6261,6 +6297,7 @@
   function syncPhonePortrait() {
     if (isPhonePortrait()) {
       if (!wasPhonePortrait) {
+        if (GM && mode === 'games') GM.cancel(); // games
         wasPhonePortrait = true;
         activePtrs.clear();
         pan = null; pinch = null; mapTap = null; worldTap = null;
@@ -6297,6 +6334,7 @@
     openPassport(validSec ? { section: validSec, spread: spq, instant: true } : { instant: true });
   }
   else if (vq === 'mail' && currentPlayer()) { goWorld(0); amEnter(Q.get('letter') || ''); } // air mail: &letter=<id> starts that letter, without it the letter box opens
+  else if (GM && ['games', 'borders', 'mancala', 'othello'].includes(vq) && (currentPlayer() || Q.get('done') === 'all')) { goWorld(0); GM.enter(vq, Q); } // games
   else if (vq === 'world' || Q.get('done') === 'all' || Q.has('noattract') || Q.has('player') || Q.has('compare')) { goWorld(0); if (Q.get('done') === 'all') after(0.6, wakeAll); else if (store.players.length >= 2 && !Q.has('player') && !Q.has('noattract') && !Q.has('compare')) needFirstPick = true; }
   else if (store.players.length === 1) { goWorld(0); }
   else if (store.players.length >= 2) { goWorld(0); needFirstPick = true; }
@@ -6403,7 +6441,8 @@
     w2s: (x, y) => { const h = w2h(x, y); return [h[0] / 1000 * innerHeight, h[1] / 1000 * innerHeight]; },
     freeze: v => { frozen = !!v; }, advance: sec => { for (let t = 0; t < sec - 1e-6; t += 1 / 60) { update(1 / 60); if (mode === 'mail') amCamera(1 / 60, AM.settled); } }, // air mail: camera per step too // batch 4 test hooks: hold the clock, step it (frame-exact screenshots)
     prog: () => prog,
-    mail: amApi // air mail
+    mail: amApi, // air mail
+    games: GM ? GM.api : null // games
   };
   function loop(now) {
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
