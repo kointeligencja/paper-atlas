@@ -116,7 +116,7 @@
       return 0;
     }
 
-    function checkLeaveGuard(btnId, btnSprite) {
+    function checkLeaveGuard(btnId, btnSprite, msg) {
       if (screen !== 'play') return true;
       if (currentMoves() < 4) return true;
       const now = ctx.now();
@@ -126,8 +126,19 @@
       }
       leaveArmed = { id: btnId, until: now + 3 };
       if (btnSprite) ctx.startWobble(btnSprite);
-      ctx.setHint('Tap again to leave the game');
+      ctx.setHint(msg || 'Tap again to leave the game');
       return false;
+    }
+
+    // "New game": start the same game again with the same options and the same starter
+    function ensureRestartBtn() {
+      if (!ctx.btn.restart) { ctx.mkBtn('restart', 'New game', ctx.PAP[6]); ctx.btn.restart.alpha = 0; }
+      return ctx.btn.restart;
+    }
+    function restartGame(btnSprite) {
+      if (screen !== 'play' || !activeId) return;
+      if (!checkLeaveGuard('restart', btnSprite, 'Tap again to start a new game')) return;
+      startGame(activeId, activeOpt, false);
     }
 
     function stopActiveGame() {
@@ -222,6 +233,7 @@
       storyState = null;
       setupState = null;
       leaveArmed = { id: null, until: 0 };
+      if (ctx.btn && ctx.btn.restart) ctx.btn.restart.alpha = 0;
       if (ctx.btn) {
         for (const id of Object.keys(ctx.btn)) {
           const b = ctx.btn[id];
@@ -1412,6 +1424,7 @@
     function visibleBarIds() {
       if (screen === 'play' || screen === 'over') {
         const ids = ['games', 'world', 'sound'];
+        if (screen === 'play' && currentMoves() > 0) { ensureRestartBtn(); ids.splice(1, 0, 'restart'); }
         if (screen === 'play' && activeGame && activeGame.hint) {
           ids.unshift('hint');
         }
@@ -1432,7 +1445,7 @@
         return;
       }
       const hPx = ctx.hudPx();
-      const visBtns = ['hint', 'games', 'world', 'sound', 'undo', 'zoomOut', 'zoomIn']
+      const visBtns = ['hint', 'games', 'restart', 'world', 'sound', 'undo', 'zoomOut', 'zoomIn']
         .map(id => ({ id, s: ctx.btn[id] }))
         .filter(q => q.s && q.s.alpha > 0.5);
       const bh = ctx.pickHit(visBtns, p.hx, p.hy, 8, hPx, q => q.s);
@@ -1444,6 +1457,7 @@
           return;
         }
         if (bh.id === 'games') { press(); return; }
+        if (bh.id === 'restart') { restartGame(bh.s); return; }
         if (bh.id === 'world') {
           if (screen === 'play' && !checkLeaveGuard('world', bh.s)) return;
           ctx.press('world');
@@ -1506,7 +1520,7 @@
       playerBtn.rot = playerBtn.tilt + ctx.wobbleRot(playerBtn);
       if (hintS) hintS.rot = hintS.tilt;
 
-      const allHide = ['passport', 'mail', 'mailMap', 'hint', 'games', 'world', 'sound', 'undo', 'zoomOut', 'zoomIn'];
+      const allHide = ['passport', 'mail', 'mailMap', 'hint', 'games', 'restart', 'world', 'sound', 'undo', 'zoomOut', 'zoomIn'];
       for (const id of allHide) { if (btn[id]) btn[id].alpha = 0; }
 
       const showIds = visibleBarIds().filter(id => !!btn[id]);
@@ -1728,6 +1742,8 @@
       },
       logic: PG.logic
     };
+
+    ensureRestartBtn(); // made once at boot, hidden until a game is in play
 
     return {
       btnOn, press, enter, exit,
