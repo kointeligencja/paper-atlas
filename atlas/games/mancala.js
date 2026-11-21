@@ -321,6 +321,8 @@
     const BOARD_W = 1024, BOARD_H = 464, BOARD_S = 2;
     const OX = BOARD_W / 2, OY = BOARD_H / 2;
 
+    let page = null;
+    let sceneSprs = [];
     let boardSpr = null;
     let ringTex = null;
     let ringSprs = [];
@@ -328,6 +330,39 @@
     let badges = new Array(14).fill(null);
     let dispCounts = new Array(14).fill(0);
     let lastCamKey = '';
+
+    function strokePaper(b, path, col, rel, lw, cap) {
+      for (const [x, st] of [[b.c, col], [b.g, B.grey(rel)]]) {
+        x.strokeStyle = st;
+        x.lineWidth = lw;
+        x.lineCap = cap || 'round';
+        x.lineJoin = 'round';
+        x.beginPath();
+        path(x);
+        x.stroke();
+      }
+    }
+
+    function domePaper(b, x, y, r, col, r0, r1, ry) {
+      const c = b.c, g = b.g;
+      ry = ry || r;
+      c.fillStyle = col;
+      c.beginPath();
+      c.ellipse(x, y, r, ry, 0, 0, Math.PI * 2);
+      c.fill();
+      g.save();
+      g.translate(x, y);
+      g.scale(1, ry / r);
+      const gr = g.createRadialGradient(0, 0, 0, 0, 0, r);
+      gr.addColorStop(0, B.grey(r1));
+      gr.addColorStop(0.6, B.grey(ctx.lerp(r0, r1, 0.75)));
+      gr.addColorStop(1, B.grey(r0));
+      g.fillStyle = gr;
+      g.beginPath();
+      g.arc(0, 0, r, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
 
     function roundRectPath(q, x, y, w, h, r) {
       const rr = Math.min(r, w / 2, h / 2);
@@ -375,110 +410,143 @@
       q.closePath();
     }
 
+    function clearScene() {
+      for (const s of sceneSprs) K.kill(s);
+      sceneSprs.length = 0;
+      if (page) { page.destroy(); page = null; }
+    }
+
+    function ensureScene() {
+      K.hideMat();
+      if (page) return;
+      page = K.gamePage({ cx: GX, cy: GY - 88, w: 1320, h: 660, frameOrder: 6, tableOrder: -20 });
+      const IN = page.in;
+      const sx = IN.w / 1434, sy = IN.h / 709;
+      const pyMap = py => IN.y0 + (py + 284) * sy;
+      const R = ctx.rng(7);
+
+      const SKY = ['#d9607c', '#e87862', '#f09a50', '#f7c45c'];
+      const topH = pyMap(-90) - (IN.y0 - 8);
+      page.flat(SKY[0], { x: IN.cx, y: IN.y0 - 8 + topH * 0.5, w: IN.w + 28, h: topH, z: 0.04, zr: 0, order: -10 });
+      page.strata(SKY[1], pyMap(-236), pyMap(-90), 7 * sy, 1.0, 0.07, -9);
+      page.strata(SKY[2], pyMap(-196), pyMap(-90), 6 * sy, 3.4, 0.10, -8);
+      page.strata(SKY[3], pyMap(-160), pyMap(-90), 5 * sy, 5.2, 0.13, -7);
+
+      const sunR = 62 * sy, sunSz = 144, sunS = 2;
+      const sunTex = ctx.shapeTex(sunSz * sunS, sunSz * sunS, b => {
+        b.s = sunS;
+        const c = sunSz * sunS * 0.5;
+        B.paper(b, q => q.arc(c, c, sunR * sunS, 0, Math.PI * 2), '#ffe9a6', 0.6);
+      }, { noMip: true });
+      sceneSprs.push(K.spr(sunTex, {
+        x: IN.cx - 360 * sx, y: pyMap(-138), w: sunSz, h: sunSz,
+        z: 0.15, zr: 0.03, order: -6, own: true,
+      }));
+
+      page.strata('#a8527f', pyMap(-142), pyMap(-80), 16 * sy, 0.4, 0.20, -5);
+      page.strata('#743a70', pyMap(-118), pyMap(-80), 12 * sy, 2.3, 0.26, -3);
+      page.strata('#ecb94c', pyMap(-96), IN.y1 + 6, 7 * sy, 1.0, 0.30, -2, (b, cy) => {
+        for (let i = 0; i < 26; i++) {
+          const x = -IN.w * 0.5 + 30 * sx + R() * (IN.w - 60 * sx);
+          const y = pyMap(-78 + R() * 26) - cy;
+          const s = (5 + R() * 5) * sy;
+          strokePaper(b, q => {
+            q.moveTo(x - s * 0.5, y); q.lineTo(x - s * 0.9, y - s);
+            q.moveTo(x, y); q.lineTo(x, y - s * 1.4);
+            q.moveTo(x + s * 0.5, y); q.lineTo(x + s, y - s);
+          }, R() < 0.5 ? '#d39a30' : '#f6d57c', 0.58, 1.9);
+        }
+      });
+    }
+
     function bakeBoardTex() {
       const S = BOARD_S;
-      const sx = x => (OX + x) * S;
-      const sy = y => (OY + y) * S;
-      return ctx.shapeTex(BOARD_W * S, BOARD_H * S, b => {
-        // Clay paper body: 1000 x 440, rounded 40, hand-cut edge, relief 0.80
-        B.paper(b, q => wobRoundRectPath(q, sx(-500), sy(-220), 1000 * S, 440 * S, 40 * S, 2.2 * S, 411), '#b8763c', 0.80);
+      const W = BOARD_W * S, H = BOARD_H * S;
+      const R = ctx.rng(7);
+      const WOOD = '#c26a2d', WOOD_L = '#d98a40', PIT = '#5b2a12', PIT_D = '#431d0b';
+      const PR = 50;
+      return ctx.shapeTex(W, H, b => {
+        b.s = S;
+        for (const g of [b.c, b.g]) g.setTransform(S, 0, 0, S, W * 0.5, H * 0.5);
 
-        // Outer rim 14 wide, #8f5527, relief 0.95 (thicker cardboard layer)
-        B.paper(b, q => {
-          wobRoundRectPath(q, sx(-500), sy(-220), 1000 * S, 440 * S, 40 * S, 2.2 * S, 411);
-          roundRectPath(q, sx(-486), sy(-206), 972 * S, 412 * S, 28 * S);
-        }, '#8f5527', 0.95, 'evenodd');
+        // Thick wood base with darker bevel rim, no triangle strips
+        B.paper(b, q => roundRectPath(q, -504, -208, 1008, 416, 84), '#84421a', 0.42);
+        B.paper(b, q => roundRectPath(q, -496, -201, 992, 398, 78), WOOD, 0.86);
 
-        // Pattern bands at y = [-204..-160] and [160..204], x = [-350..350]
-        for (const side of [-1, 1]) {
-          const yTop = side < 0 ? -204 : 160;
-          B.paper(b, q => q.rect(sx(-350), sy(yTop), 700 * S, 44 * S), PAP[5], 0.86);
-          const base = 28, nTri = 25;
-          const yA = sy(yTop + 4), yB = sy(yTop + 40);
-          for (let i = 0; i < nTri; i++) {
-            const x0 = sx(-350 + i * base), x1 = sx(-350 + (i + 1) * base), xm = (x0 + x1) * 0.5;
-            const col = (i % 2 === 0) ? PAP[10] : PAP[0];
-            B.paper(b, q => {
-              if (side > 0) { q.moveTo(x0, yB); q.lineTo(x1, yB); q.lineTo(xm, yA); }
-              else { q.moveTo(x0, yA); q.lineTo(x1, yA); q.lineTo(xm, yB); }
-              q.closePath();
-            }, col, 0.88);
-          }
+        // Subtle horizontal wood grain ink lines
+        b.c.save();
+        b.c.strokeStyle = 'rgba(110,50,10,0.15)';
+        b.c.lineWidth = 1.8;
+        b.c.lineCap = 'round';
+        b.c.beginPath();
+        for (let i = 0; i < 24; i++) {
+          const y = -188 + i * 16 + R() * 5;
+          b.c.moveTo(-462 + R() * 50, y);
+          b.c.bezierCurveTo(-165, y + R() * 12 - 6, 165, y + R() * 12 - 6, 462 - R() * 50, y + R() * 5);
         }
+        b.c.stroke();
+        b.c.restore();
 
-        // Row of small cream diamonds (10 x 10) along middle line y = 0
-        for (let dx = -300; dx <= 300; dx += 60) {
-          const cx = sx(dx), cy = sy(0), r = 7 * S;
-          B.paper(b, q => {
-            q.moveTo(cx, cy - r); q.lineTo(cx + r, cy); q.lineTo(cx, cy + r); q.lineTo(cx - r, cy); q.closePath();
-          }, PAP[0], 0.88);
-        }
+        // One cut cream rail line along each rail
+        strokePaper(b, q => {
+          q.moveTo(-355, -180); q.lineTo(355, -180);
+          q.moveTo(-355, 180); q.lineTo(355, 180);
+        }, '#f3dca4', 0.90, 3.5);
 
-        // 12 pits: step ring r=52 (#9a5f2d, relief 0.50), floor r=44 (#6e3f1c, relief 0.12)
+        // 12 deep concave domed pits at (-300 + 120*i, ±100)
         for (let col = 0; col < 6; col++) {
-          const px = sx(-300 + 120 * col);
-          for (const pyWorld of [-100, 100]) {
-            const py = sy(pyWorld);
-            B.paper(b, q => q.arc(px, py, 52 * S, 0, Math.PI * 2), '#9a5f2d', 0.50);
-            B.paper(b, q => q.arc(px, py, 44 * S, 0, Math.PI * 2), '#6e3f1c', 0.12);
+          const px = -300 + 120 * col;
+          for (const py of [-100, 100]) {
+            B.paper(b, q => q.arc(px, py, PR + 7, 0, Math.PI * 2), WOOD_L, 0.95);
+            domePaper(b, px, py, PR, PIT, 0.34, 0.04);
+            B.paper(b, q => q.ellipse(px - 8, py - 10, PR * 0.62, PR * 0.5, 0.6, 0, Math.PI * 2), PIT_D, 0.03);
           }
         }
 
-        // 2 stores at x = ±420, y = 0: step 104x300 (relief 0.50), floor 88x284 (relief 0.12)
-        for (const stX of [-420, 420]) {
-          B.paper(b, q => roundRectPath(q, sx(stX - 52), sy(-150), 104 * S, 300 * S, 52 * S), '#9a5f2d', 0.50);
-          B.paper(b, q => roundRectPath(q, sx(stX - 44), sy(-142), 88 * S, 284 * S, 44 * S), '#6e3f1c', 0.12);
+        // 2 deep stores at x = ±420, y = 0
+        for (const sx of [-1, 1]) {
+          B.paper(b, q => roundRectPath(q, sx * 420 - 52, -152, 104, 304, 52), WOOD_L, 0.95);
+          B.paper(b, q => roundRectPath(q, sx * 420 - 44, -144, 88, 288, 44), PIT, 0.10);
+          B.paper(b, q => roundRectPath(q, sx * 420 - 33, -134, 62, 260, 30), PIT_D, 0.03);
         }
       }, { noMip: true });
     }
 
     function bakeRingTex() {
-      const sz = 136, S = 2, c = sz * S / 2;
+      const sz = 132, S = 2, c = sz * S / 2;
       return ctx.shapeTex(sz * S, sz * S, b => {
-        B.paper(b, q => {
-          q.arc(c, c, 62 * S, 0, Math.PI * 2);
-          q.moveTo(c + 54 * S, c);
-          q.arc(c, c, 54 * S, 0, Math.PI * 2, true);
-        }, CREAM, 0.90, 'evenodd');
+        b.s = S;
+        strokePaper(b, q => q.arc(c, c, 57 * S, 0, Math.PI * 2), '#fbf3dc', 0.80, 4.5 * S);
       }, { noMip: true });
     }
 
     function ensureBoard() {
-      K.ensureMat();
+      ensureScene();
       if (!boardSpr) {
         boardSpr = K.spr(bakeBoardTex(), {
           x: GX, y: GY, w: BOARD_W, h: BOARD_H,
-          z: 0.10, zr: 0.34, order: 30, own: true,
+          z: 0.95, zr: 0.42, order: 10, own: true,
         });
       }
       if (!ringTex) ringTex = bakeRingTex();
     }
 
-    function fitBoardCam() {
-      const topM = Math.min(0.32, (ctx.topHudBottom() + 10) / 1000);
-      return ctx.fitCam([GX - 540, GY - 310, GX + 540, GY + 310], { l: 0.02, r: 0.02, t: topM, b: 0.03 }, 0, false);
-    }
-
     function moveCam(immediate) {
-      const fc = fitBoardCam();
+      ensureScene();
+      page.fitCam(immediate);
       lastCamKey = `${ctx.asp().toFixed(3)}|${Math.round(ctx.topHudBottom())}`;
-      if (immediate || K.isFast()) {
-        ctx.killTw(ctx.cam, ['x', 'y', 'h']);
-        ctx.cam.x = fc.x; ctx.cam.y = fc.y; ctx.cam.h = fc.h;
-      } else {
-        ctx.camTo(fc.x, fc.y, fc.h, 0.9);
-      }
     }
 
     function badgePos(i) {
-      if (i >= 0 && i <= 5) return [GX - 300 + 120 * i, GY + 254, 44];
-      if (i === 6) return [GX + 420, GY + 254, 60];
-      if (i >= 7 && i <= 12) return [GX + 300 - 120 * (i - 7), GY - 254, 44];
-      return [GX - 420, GY - 254, 60];
+      if (i >= 0 && i <= 5) return [GX - 300 + 120 * i + 42, GY + 100 + 44, 30];
+      if (i === 6) return [GX + 492, GY + 160, 50];
+      if (i >= 7 && i <= 12) return [GX + 300 - 120 * (i - 7) + 42, GY - 100 - 44, 30];
+      return [GX - 492, GY - 160, 50];
     }
 
     function badgeBaseRot(i) {
-      return (i >= 7 && isAcross()) ? Math.PI : 0;
+      const tilt = i === 13 ? -0.12 : i === 6 ? 0.10 : i >= 7 ? 0.10 : -0.08;
+      return tilt + ((i >= 7 && isAcross()) ? Math.PI : 0);
     }
 
     function setBadge(i, n) {
@@ -493,7 +561,7 @@
         dispCounts[i] = state.pits[i];
         badges[i] = K.spr(K.badge(state.pits[i]), {
           x: bx, y: by, w: d, h: d,
-          z: 0.08, zr: 0.05, order: 34,
+          z: (i === 6 || i === 13) ? 1.50 : 1.42, zr: 0.03, order: 70,
           rot: badgeBaseRot(i), own: false,
         });
       }
@@ -506,17 +574,6 @@
 
     function showRings() {
       clearRings();
-      if (state.over || busy) return;
-      const leg = L.legal(state);
-      for (let i = 0; i < leg.length; i++) {
-        const [px, py] = pitCenter(leg[i]);
-        const s = K.spr(ringTex, {
-          x: px, y: py, w: 136, h: 136,
-          z: 0.38, zr: 0.05, order: 35, lift: 0.25, own: false,
-        });
-        K.tw(s, { lift: 0 }, 2 / 12, { cut: true });
-        ringSprs.push(s);
-      }
     }
 
     function clearTurnTab() {
@@ -525,56 +582,30 @@
 
     function showTurnTab() {
       clearTurnTab();
-      if (state.over) return;
-      const p = state.turn;
-      turnTab = K.worldTab('Your turn', GX, GY + (p === 1 ? 296 : -296), {
-        px: 30,
-        scale: 2,
-        colr: p === 1 ? K.COL.p1 : K.COL.p2,
-        ink: CREAM,
-        rot: (p === 2 && isAcross()) ? Math.PI : 0,
-        z: 0.08,
-        order: 36,
-        lift: 0.18,
-      });
-      K.tw(turnTab, { lift: 0 }, 2 / 12, { cut: true });
     }
 
-    const BEAN_COLS = ['#e9dcc0', '#c9a26b', '#7a8a6a', PAP[3]];
-    const SEED_TEX_W = 32, SEED_TEX_H = 26, SEED_S = 3;
+    const BEAN_COLS = ['#f6ecd2', '#f4c443', '#e5604d', '#1f8f84'];
+    const SEED_TEX_W = 34, SEED_TEX_H = 34, SEED_S = 3;
+    const FLOOR = 0.99;
     let beanTexs = null;
     let shellTex = null;
     let allSeeds = [];
     let pitSeeds = Array.from({ length: 14 }, () => []);
 
-    function beanPath(q, cx, cy, rx, ry) {
-      q.moveTo(cx + rx, cy);
-      q.bezierCurveTo(cx + rx, cy - ry * 0.95, cx - rx, cy - ry * 0.95, cx - rx, cy);
-      q.bezierCurveTo(cx - rx, cy + ry * 0.95, cx - rx * 0.22, cy + ry * 0.95, cx - rx * 0.14, cy + ry * 0.78);
-      q.lineTo(cx, cy + ry * 0.42);
-      q.lineTo(cx + rx * 0.16, cy + ry * 0.80);
-      q.bezierCurveTo(cx + rx * 0.30, cy + ry * 0.95, cx + rx, cy + ry * 0.95, cx + rx, cy);
-      q.closePath();
-    }
-
     function bakeSeedTexs() {
-      const W = SEED_TEX_W * SEED_S, H = SEED_TEX_H * SEED_S, cx = W / 2, cy = H / 2;
+      const W = SEED_TEX_W * SEED_S, H = SEED_TEX_H * SEED_S;
       beanTexs = BEAN_COLS.map(col => ctx.shapeTex(W, H, b => {
-        B.paper(b, q => beanPath(q, cx, cy, 13 * SEED_S, 10 * SEED_S), col, 0.85);
-        // Subtle bevel edge line so stacked seeds read clearly
-        b.c.save();
-        b.c.strokeStyle = 'rgba(42,28,18,0.22)';
-        b.c.lineWidth = 1.6;
-        b.c.beginPath();
-        beanPath(b.c, cx, cy, 12.2 * SEED_S, 9.2 * SEED_S);
-        b.c.stroke();
-        b.c.restore();
+        b.s = SEED_S;
+        for (const g of [b.c, b.g]) g.setTransform(SEED_S, 0, 0, SEED_S, W * 0.5, H * 0.5);
+        domePaper(b, 0, 0, 14.5, col, 0.3, 1);
+        B.paper(b, q => q.ellipse(-4.6, -5.3, 3.5, 2.3, -0.7, 0, Math.PI * 2), '#fffaf0', 1);
       }, { noMip: true }));
 
       shellTex = ctx.shapeTex(W, H, b => {
-        const rx = 13 * SEED_S, ry = 9 * SEED_S;
+        b.s = SEED_S;
+        const cx = W * 0.5, cy = H * 0.5;
+        const rx = 13 * SEED_S, ry = 9.5 * SEED_S;
         B.paper(b, q => q.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2), '#efe6d2', 0.85);
-        // Dark slit along the middle + small cowrie teeth
         B.paper(b, q => {
           q.moveTo(cx - rx * 0.68, cy);
           q.quadraticCurveTo(cx, cy - ry * 0.18, cx + rx * 0.68, cy);
@@ -603,52 +634,25 @@
     function slotPos(pit, n) {
       const [cx, cy] = pitCenter(pit);
       if (pit === 6 || pit === 13) {
-        // Store: 4 cols x 12 rows, pitch 20 x 22, second layer same
-        const layer = Math.floor(n / 48);
-        const k = n % 48;
-        const col = k % 4;
-        const row = Math.floor(k / 4);
-        let ox = (col - 1.5) * 20;
-        const oy = (row - 5.5) * 22;
-        if (row === 0 || row === 11) ox *= 0.62;
-        else if (row === 1 || row === 10) ox *= 0.88;
-        const jx = (ctx.hs(pit, n, 1) - 0.5) * 5;
-        const jy = (ctx.hs(pit, n, 2) - 0.5) * 5;
-        const z = 0.15 + Math.min(layer, 2) * 0.04;
-        const order = 40 + layer * 24 + (k % 24) * 0.5;
-        return { x: cx + ox + jx, y: cy + oy + jy, z, order };
+        const layer = Math.floor(n / 14);
+        const k = n % 14;
+        const ox = (k % 2 ? 12 : -12) + (ctx.hs(pit, n, 1) - 0.5) * 10;
+        const oy = -100 + (k >> 1) * 32 + (k % 2) * 14 + (ctx.hs(pit, n, 2) - 0.5) * 10;
+        const z = FLOOR + Math.min(layer, 3) * 0.03 + (k % 7) * 0.004;
+        const order = 12 + layer * 16 + k * 0.25;
+        return { x: cx + ox, y: cy + oy, z, order };
       }
 
-      // Pit: seed 0 centre, 1-6 ring r=24, 7-18 layer 2 (z=0.19) rings r=14 (4) & r=30 (8), 19+ layer 3 (z=0.23)
-      let ox = 0, oy = 0, layer = 0;
-      if (n === 0) {
-        ox = 0; oy = 0; layer = 0;
-      } else if (n <= 6) {
-        const a = ((n - 1) / 6) * Math.PI * 2 + pit * 0.53;
-        ox = Math.cos(a) * 24;
-        oy = Math.sin(a) * 24;
-        layer = 0;
-      } else {
-        layer = n <= 18 ? 1 : 2;
-        const m = (n - 7) % 12;
-        const shift = layer === 2 ? 0.28 : 0;
-        if (m < 4) {
-          const a = (m / 4) * Math.PI * 2 + 0.4 + pit * 0.37 + shift;
-          ox = Math.cos(a) * 14;
-          oy = Math.sin(a) * 14;
-        } else {
-          const a = ((m - 4) / 8) * Math.PI * 2 + 0.2 + pit * 0.37 + shift;
-          ox = Math.cos(a) * 30;
-          oy = Math.sin(a) * 30;
-        }
-      }
-      const jx = (ctx.hs(pit, n, 1) - 0.5) * 8;
-      const jy = (ctx.hs(pit, n, 2) - 0.5) * 8;
-      let fx = ox + jx, fy = oy + jy;
+      const layer = n < 7 ? 0 : n < 16 ? 1 : 2;
+      const m = layer === 0 ? n : (n - 7) % 9;
+      const a = m * 2.4 + pit * 0.73 + layer * 0.45 + (ctx.hs(pit, n, 3) - 0.5) * 0.4;
+      const d = Math.min(28, (m === 0 && layer === 0 ? 7 : 10) + Math.sqrt(m) * 8.6);
+      let fx = Math.cos(a) * d + (ctx.hs(pit, n, 1) - 0.5) * 5;
+      let fy = Math.sin(a) * d * 0.94 + (ctx.hs(pit, n, 2) - 0.5) * 5;
       const dist = Math.hypot(fx, fy);
-      if (dist > 31) { fx = fx / dist * 31; fy = fy / dist * 31; }
-      const z = layer === 0 ? 0.15 : layer === 1 ? 0.19 : 0.23;
-      const order = 40 + layer * 14 + (n % 14) * 0.5;
+      if (dist > 29) { fx = fx / dist * 29; fy = fy / dist * 29; }
+      const z = FLOOR + Math.min(n, 10) * 0.012;
+      const order = 12 + Math.min(n, 24) * 0.5;
       return { x: cx + fx, y: cy + fy, z, order };
     }
 
@@ -666,10 +670,10 @@
         const cnt = state.pits[p] | 0;
         for (let slot = 0; slot < cnt; slot++) {
           const pos = slotPos(p, slot);
-          const rot = (ctx.hs(idx, 37, 11) - 0.5) * 1.4;
+          const rot = opt.look === 'shells' ? (ctx.hs(idx, 37, 11) - 0.5) * 1.4 : (ctx.hs(idx, 37, 11) - 0.5) * 0.4;
           const s = K.spr(seedTexFor(idx), {
             x: pos.x, y: pos.y, w: SEED_TEX_W, h: SEED_TEX_H,
-            z: pos.z, zr: 0.05, order: pos.order, rot, lift: 0, own: false,
+            z: pos.z, zr: 0.20, order: pos.order, rot, lift: 0, own: false,
           });
           const obj = { id: idx, rot, spr: s };
           allSeeds.push(obj);
@@ -778,8 +782,8 @@
         const s = K.spr(isLast ? starDotTex : dotTex, {
           x: rx, y: ry,
           w: isLast ? 34 : 22, h: isLast ? 34 : 22,
-          z: isLast ? 0.42 : 0.40, zr: 0.05,
-          order: isLast ? 39 : 38,
+          z: isLast ? 1.46 : 1.44, zr: 0.05,
+          order: isLast ? 75 : 74,
           lift: 0.14, own: false,
         });
         K.tw(s, { lift: 0 }, 1 / 12, { cut: true });
@@ -871,7 +875,7 @@
         colr,
         ink: inkCol,
         rot: rot || 0,
-        z: 0.48,
+        z: 1.55,
         order: 130,
         lift: 0.35,
       });
@@ -1278,16 +1282,21 @@
       layoutEndUI();
     }
 
+    function freeLocalTexs() {
+      if (ringTex) { B.freeTex(ringTex); ringTex = null; }
+      if (dotTex) { B.freeTex(dotTex); dotTex = null; }
+      if (starDotTex) { B.freeTex(starDotTex); starDotTex = null; }
+      if (beanTexs) { for (const t of beanTexs) if (t) B.freeTex(t); beanTexs = null; }
+      if (shellTex) { B.freeTex(shellTex); shellTex = null; }
+    }
+
     function rebake() {
       if (boardSpr) {
         K.kill(boardSpr);
         boardSpr = null;
       }
-      ringTex = null;
-      dotTex = null;
-      starDotTex = null;
-      beanTexs = null;
-      shellTex = null;
+      clearScene();
+      freeLocalTexs();
       ensureBoard();
       bakeSeedTexs();
       for (const sd of allSeeds) sd.spr.tex = seedTexFor(sd.id);
@@ -1367,6 +1376,8 @@
       clearSeeds();
       for (let i = 0; i < 14; i++) { if (badges[i]) { K.kill(badges[i]); badges[i] = null; } }
       if (boardSpr) { K.kill(boardSpr); boardSpr = null; }
+      clearScene();
+      freeLocalTexs();
       K.turnDisplay(ctx.currentPlayer(), null, false);
       if (ctx.updateHudToken) ctx.updateHudToken();
       K.hideMat();

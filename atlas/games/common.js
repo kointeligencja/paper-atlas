@@ -252,6 +252,182 @@
       if (matSprite) { kill(matSprite); matSprite = null; }
     }
 
+    const MAP = {
+      SEA: '#b5cfd0',
+      PALE: '#e3d8bf',
+      BLACK: '#0d0d0f',
+      CREAM: '#efe8d8',
+      TABLE: '#d3c1a0',
+      INKSEA: '#15181f'
+    };
+
+    function gamePage(o) {
+      const opt = o || {};
+      const cx = opt.cx !== undefined ? opt.cx : GT[0];
+      const cy = opt.cy !== undefined ? opt.cy : GT[1];
+      const w = opt.w || 1354;
+      const h = opt.h || 670;
+      const x0 = cx - w * 0.5, x1 = cx + w * 0.5;
+      const y0 = cy - h * 0.5, y1 = cy + h * 0.5;
+      const baseBorder = opt.border !== undefined ? opt.border : Math.round(h * 0.043);
+      const frameOrder = opt.frameOrder !== undefined ? opt.frameOrder : 6;
+      const tableOrder = opt.tableOrder !== undefined ? opt.tableOrder : -20;
+      const tableCol = opt.tableCol || MAP.TABLE;
+      const frameCol = opt.frameCol || MAP.BLACK;
+
+      const pageSprs = new Set();
+      const flatCache = {};
+      let bw = baseBorder;
+      let tableSpr = null;
+      let clipSprs = [];
+      let frameSpr = null;
+
+      function addSpr(tex, so) {
+        const s = spr(tex, so);
+        pageSprs.add(s);
+        return s;
+      }
+
+      function killPageSpr(s) {
+        if (!s) return;
+        pageSprs.delete(s);
+        kill(s);
+      }
+
+      function flatTex(col) {
+        const k = col || '#ffffff';
+        if (flatCache[k]) return flatCache[k];
+        flatCache[k] = ctx.shapeTex(8, 8, b => {
+          B.paper(b, q => q.rect(-2, -2, 12, 12), k, 0.5);
+        }, { noMip: true });
+        return flatCache[k];
+      }
+
+      function margins() {
+        const topB = ctx.topHudBottom ? ctx.topHudBottom() : 175;
+        if (ctx.PHONE) {
+          return { l: 0.01, r: 0.01, t: Math.min(0.32, (topB + 6) / 1000), b: 0.015 };
+        }
+        return { l: 0.032, r: 0.032, t: Math.min(0.32, (topB + 10) / 1000), b: 0.042 };
+      }
+
+      function calcBorder() {
+        if (!ctx.PHONE) return baseBorder;
+        const m = margins();
+        const asp = ctx.asp ? ctx.asp() : 1.6;
+        const vh = Math.max(200, (typeof window !== 'undefined' && window.innerHeight) || 390);
+        const vw = Math.max(200, (typeof window !== 'undefined' && window.innerWidth) || Math.round(vh * asp));
+        const availH = Math.max(40, vh * (1 - m.t - m.b) - 16);
+        const availW = Math.max(40, vw * (1 - m.l - m.r) - 16);
+        const ppu = Math.min(availW / w, availH / h);
+        return ctx.clamp(8 / Math.max(0.1, ppu), 6, 24);
+      }
+
+      function buildShell() {
+        bw = calcBorder();
+        const tTex = flatTex(tableCol);
+        if (!tableSpr) {
+          tableSpr = addSpr(tTex, { x: cx, y: cy, w: 6000, h: 6000, z: 0.01, zr: 0, order: tableOrder, own: false });
+        }
+        for (const s of clipSprs) killPageSpr(s);
+        clipSprs.length = 0;
+        const pad = bw * 0.45;
+        const span = 2600;
+        const clipRects = [
+          [x0 - pad - span * 0.5, cy, span, h + span * 2],
+          [x1 + pad + span * 0.5, cy, span, h + span * 2],
+          [cx, y0 - pad - span * 0.5, w + pad * 2, span],
+          [cx, y1 + pad + span * 0.5, w + pad * 2, span]
+        ];
+        for (const [rx, ry, rw, rh] of clipRects) {
+          clipSprs.push(addSpr(tTex, { x: rx, y: ry, w: rw, h: rh, z: 0.01, zr: 0, order: frameOrder - 1, own: false }));
+        }
+        if (frameSpr) killPageSpr(frameSpr);
+        const S = 1.5, m = 6;
+        const ow = w + bw * 2, oh = h + bw * 2;
+        const uw = ow + m * 2, uh = oh + m * 2;
+        const fTex = ctx.shapeTex(Math.round(uw * S), Math.round(uh * S), b => {
+          b.s = S;
+          B.paper(b, q => {
+            q.rect(m * S, m * S, ow * S, oh * S);
+            q.rect((m + bw) * S, (m + bw) * S, w * S, h * S);
+          }, frameCol, 0.7, 'evenodd');
+        }, { noMip: true });
+        frameSpr = addSpr(fTex, { x: cx, y: cy, w: uw, h: uh, z: 0.34, zr: 0.10, order: frameOrder, own: true });
+      }
+
+      function bounds() {
+        return [x0 - bw, y0 - bw, x1 + bw, y1 + bw];
+      }
+
+      function camRect() {
+        return ctx.fitCam(bounds(), margins(), 0, false);
+      }
+
+      function fitCam(immediate) {
+        const nextB = calcBorder();
+        if (Math.abs(nextB - bw) > 0.5) buildShell();
+        const fc = camRect();
+        if (immediate || fastMode) {
+          ctx.killTw(ctx.cam, ['x', 'y', 'h']);
+          ctx.cam.x = fc.x; ctx.cam.y = fc.y; ctx.cam.h = fc.h;
+        } else {
+          ctx.camTo(fc.x, fc.y, fc.h, 0.9);
+        }
+        return fc;
+      }
+
+      function flat(col, so) {
+        return addSpr(flatTex(col), Object.assign({ own: false }, so));
+      }
+
+      function strata(col, topY, botY, amp, ph, z, order, extra) {
+        const bleed = Math.min(14, Math.max(4, bw * 0.5));
+        const uw = w + bleed * 2 + 4;
+        const uh = botY - topY + 2 * amp + 12;
+        const sy = botY - uh * 0.5;
+        const S = 1.5;
+        const tw = Math.max(4, Math.round(uw * S)), th = Math.max(4, Math.round(uh * S));
+        const tex = ctx.shapeTex(tw, th, b => {
+          b.s = S;
+          for (const g of [b.c, b.g]) g.setTransform(S, 0, 0, S, tw * 0.5, th * 0.5);
+          const lx0 = -w * 0.5 - bleed, lx1 = w * 0.5 + bleed, yb = uh * 0.5;
+          B.paper(b, q => {
+            q.moveTo(lx0, yb);
+            for (let x = lx0; x <= lx1; x += 12) {
+              q.lineTo(x, topY - sy + Math.sin(x * 0.0045 + ph) * amp + Math.sin(x * 0.013 + ph * 3) * amp * 0.3);
+            }
+            q.lineTo(lx1, topY - sy + Math.sin(lx1 * 0.0045 + ph) * amp + Math.sin(lx1 * 0.013 + ph * 3) * amp * 0.3);
+            q.lineTo(lx1, yb);
+            q.closePath();
+          }, col, 0.5);
+          if (extra) extra(b, sy);
+        }, { noMip: true });
+        return addSpr(tex, { x: cx, y: sy, w: uw, h: uh, z, zr: 0.03, order, own: true });
+      }
+
+      function destroy() {
+        const list = [...pageSprs];
+        pageSprs.clear();
+        for (const s of list) kill(s);
+        tableSpr = null;
+        clipSprs.length = 0;
+        frameSpr = null;
+        for (const k in flatCache) { if (flatCache[k]) B.freeTex(flatCache[k]); }
+        for (const k in flatCache) delete flatCache[k];
+      }
+
+      buildShell();
+      return {
+        in: { x0, x1, y0, y1, w, h, cx, cy },
+        get border() { return bw; },
+        bounds, camRect, fitCam, flat, strata,
+        spr: addSpr,
+        rebake: buildShell,
+        destroy
+      };
+    }
+
     // ---- Shared cut-paper drawing helpers ----
     function cardTex(w, h, draw, seed, sc) {
       const k = sc || ctx.devPerHud();
@@ -824,100 +1000,103 @@
       return t[0].toUpperCase() + t.slice(1);
     }
 
+    function styleColour(style) {
+      if (style === 'p1') return COL.p1;
+      if (style === 'p2') return COL.p2;
+      if (style === 'navy') return PAP[10];
+      if (style === 'cream') return PAP[0];
+      if (typeof style === 'string' && style[0] === '#') return style;
+      return COL.p2;
+    }
+
+    function botChipTex(style, sc) {
+      const scale = sc || ctx.devPerHud();
+      const col = styleColour(style);
+      const key = 'botChip:' + col + '@' + Math.round(scale * 100);
+      if (tokCache[key]) return tokCache[key];
+      const L = 84, W = Math.round(L * scale), k = W / L;
+      const t = ctx.shapeTex(W, W, b => {
+        B.paper(b, ctx.cutEdge(4 * k, 4 * k, W - 4 * k, W - 4 * k, 5 * k, ctx.sid(col) + 41), col, 0.35);
+      }, { noMip: true });
+      t.lw = L; t.lh = L;
+      tokCache[key] = t;
+      return t;
+    }
+
     function turnDisplay(who, swatchStyle, hop) {
-      const btn = ctx.playerBtn;
-      if (btn) {
-        let tex = null;
-        if (who === 'bot') tex = tokenBtnTex('bot');
-        else if (who === 'friend') tex = tokenBtnTex('friend');
-        else if (who && typeof who === 'object' && who.token && ctx.playerBtnTex) tex = ctx.playerBtnTex(who.token);
-        else if (typeof who === 'string' && ctx.playerBtnTex) tex = ctx.playerBtnTex(who);
-        if (tex) btn.tex = tex;
-        if (btn._hopBaseY !== undefined && Math.abs(btn.y - btn._hopBaseY) > 26) {
-          delete btn._hopBaseY;
-        }
-        if (hop && btn.alpha > 0.5) {
-          const baseY = btn._hopBaseY !== undefined ? btn._hopBaseY : (btn._hopBaseY = btn.y);
-          tw(btn, { y: baseY - 22, lift: 0.24 }, 0.14, {
-            cut: true,
-            done: () => tw(btn, { y: baseY, lift: 0 }, 0.20, {
-              cut: true,
-              done: () => { delete btn._hopBaseY; }
-            })
-          });
-        }
-      }
-      if (swatchStyle) {
-        const stex = swatchTex(swatchStyle);
-        const swW = 56, swH = 40;
-        const W = 1000 * ctx.asp();
-        const hintS = ctx.hint ? ctx.hint() : null;
-        const visBtn = !!(btn && btn.alpha > 0.5 && (btn.w || 0) > 0 && (btn.h || 0) > 0);
-        const visHint = !!(hintS && hintS.alpha > 0.5 && (hintS.w || 0) > 0 && (hintS.h || 0) > 0);
-        const visTitle = !!(ctx.title && ctx.title.alpha > 0.5 && (ctx.title.w || 0) > 0 && (ctx.title.h || 0) > 0);
-        const btnY = visBtn ? (btn._hopBaseY !== undefined ? btn._hopBaseY : btn.y) : 60;
-
-        const obstacles = [];
-        if (visHint) obstacles.push(hintS);
-        if (visTitle) obstacles.push(ctx.title);
-        if (visBtn) obstacles.push({ x: btn.x, y: btnY, w: btn.w, h: btn.h });
-        if (ctx.btn) {
-          for (const id of Object.keys(ctx.btn)) {
-            const b = ctx.btn[id];
-            if (b && b.alpha > 0.5 && (b.w || 0) > 0 && (b.h || 0) > 0) obstacles.push(b);
-          }
-        }
-
-        const fits = (cx, cy) => {
-          if (cx - swW * 0.5 < 8 || cx + swW * 0.5 > W - 8) return false;
-          if (cy - swH * 0.5 < 4 || cy + swH * 0.5 > 996) return false;
-          for (const o of obstacles) {
-            if (Math.abs(cx - o.x) < (swW + o.w) * 0.5 + 6 &&
-                Math.abs(cy - o.y) < (swH + o.h) * 0.5 + 4) {
-              return false;
-            }
-          }
-          return true;
-        };
-
-        const cands = [];
-        if (visBtn) {
-          cands.push([btn.x + btn.w * 0.5 + 10 + swW * 0.5, btnY]);
-        }
-        if (visHint) {
-          cands.push([hintS.x + hintS.w * 0.5 + 12 + swW * 0.5, hintS.y]);
-          cands.push([hintS.x - hintS.w * 0.5 + swW * 0.5, hintS.y + hintS.h * 0.5 + 8 + swH * 0.5]);
-        }
-        if (visTitle) {
-          cands.push([ctx.title.x + ctx.title.w * 0.5 + 12 + swW * 0.5, ctx.title.y]);
-        }
-
-        let sx = 0, sy = 0, placed = false;
-        for (const [cx, cy] of cands) {
-          if (fits(cx, cy)) { sx = cx; sy = cy; placed = true; break; }
-        }
-        if (!placed) {
-          if (visHint) {
-            sx = ctx.clamp(hintS.x - hintS.w * 0.5 + swW * 0.5, 8 + swW * 0.5, W - 8 - swW * 0.5);
-            sy = hintS.y + hintS.h * 0.5 + 8 + swH * 0.5;
-          } else {
-            sx = 24 + swW * 0.5;
-            sy = (ctx.topHudBottom ? ctx.topHudBottom() : 100) + 8 + swH * 0.5;
-          }
-        }
-
-        if (!swatchSprite || !sprites.has(swatchSprite)) {
-          swatchSprite = spr(stex, { hud: true, z: 0.12, zr: 0.03, order: 215, x: sx, y: sy, w: swW, h: swH, own: false });
-        } else {
-          swatchSprite.tex = stex;
-          swatchSprite.x = sx;
-          swatchSprite.y = sy;
-        }
-      } else if (swatchSprite) {
+      if (swatchSprite) {
         kill(swatchSprite);
         swatchSprite = null;
       }
-      return swatchSprite;
+      const btn = ctx.playerBtn;
+      if (!btn) return null;
+      if (!who) {
+        btn.alpha = ctx.currentPlayer() ? 1 : 0;
+        if (ctx.updateHudToken) ctx.updateHudToken();
+        return null;
+      }
+      let tex = null;
+      if (who === 'bot') tex = botChipTex(swatchStyle);
+      else if (who === 'friend') tex = tokenBtnTex('friend');
+      else if (who && typeof who === 'object' && who.token && ctx.playerBtnTex) tex = ctx.playerBtnTex(who.token);
+      else if (typeof who === 'string' && ctx.playerBtnTex) tex = ctx.playerBtnTex(who);
+      if (tex) btn.tex = tex;
+      btn.alpha = 1;
+
+      const asp = ctx.asp ? ctx.asp() : 1.6, W = 1000 * asp;
+      if (!ctx.currentPlayer()) {
+        const title = ctx.title, hintS = ctx.hint ? ctx.hint() : null;
+        if (asp < 0.9 && title && title.alpha > 0.5) {
+          const pad = 24, tGap = 10, maxW = Math.max(120, W - pad * 2);
+          if (btn.x + btn.w * 0.5 > W - pad) {
+            const ts = Math.min(1, maxW / Math.max(1, title.bw + tGap + btn.bw));
+            title.w = title.bw * ts; title.h = title.bh * ts;
+            title.x = pad + title.w * 0.5; title.y = 20 + title.h * 0.5;
+            btn.w = btn.bw * ts; btn.h = btn.bh * ts;
+            btn.x = title.x + title.w * 0.5 + tGap * ts + btn.w * 0.5; btn.y = title.y;
+          }
+        } else if (ctx.PHONE && !ctx.pickerOpen() && hintS && hintS.alpha > 0.5) {
+          const padX = 24, gap = 14;
+          const leftEdge = btn.x + btn.w * 0.5 + gap;
+          if (Math.abs(hintS.y - btn.y) < (hintS.h + btn.h) * 0.5 && hintS.x - hintS.w * 0.5 < leftEdge) {
+            let rightEdge = W - padX;
+            if (ctx.btn) {
+              for (const id of Object.keys(ctx.btn)) {
+                const b = ctx.btn[id];
+                if (b && b.alpha > 0.5 && Math.abs(b.y - btn.y) < (b.h + btn.h) * 0.5) {
+                  rightEdge = Math.min(rightEdge, b.x - b.w * 0.5 - gap);
+                }
+              }
+            }
+            const avail = rightEdge - leftEdge;
+            if (avail >= hintS.bw * 0.65) {
+              const k = Math.min(1, avail / Math.max(1, hintS.bw));
+              hintS.w = hintS.bw * k; hintS.h = hintS.bh * k;
+              hintS.x = leftEdge + hintS.w * 0.5;
+            } else {
+              const k = Math.min(1, Math.max(120, W - padX * 2) / Math.max(1, hintS.bw));
+              hintS.w = hintS.bw * k; hintS.h = hintS.bh * k;
+              hintS.x = padX + hintS.w * 0.5;
+              hintS.y = btn.y + btn.h * 0.5 + 8 + hintS.h * 0.5;
+            }
+          }
+        }
+      }
+
+      if (btn._hopBaseY !== undefined && Math.abs(btn.y - btn._hopBaseY) > 26) {
+        delete btn._hopBaseY;
+      }
+      if (hop && btn.alpha > 0.5) {
+        const baseY = btn._hopBaseY !== undefined ? btn._hopBaseY : (btn._hopBaseY = btn.y);
+        tw(btn, { y: baseY - 22, lift: 0.24 }, 0.14, {
+          cut: true,
+          done: () => tw(btn, { y: baseY, lift: 0 }, 0.20, {
+            cut: true,
+            done: () => { delete btn._hopBaseY; }
+          })
+        });
+      }
+      return btn;
     }
 
     function worldTab(label, x, y, o) {
@@ -940,15 +1119,15 @@
     }
 
     return {
-      NAME, HOME, FROM, GIFT_LINE, STORIES, COL, GT,
+      NAME, HOME, FROM, GIFT_LINE, STORIES, COL, MAP, GT,
       spr, kill, killAll, sprites,
       job, stepJobs, clearJobs,
       tw, after,
-      ensureMat, hideMat,
+      ensureMat, hideMat, gamePage,
       cardTex, card, tabTex, tab, tapTab, row, worldTab,
       note, closeNote, ribbon, confetti,
       badge, ensureBadges,
-      drawBotToken, drawFriendToken, drawSpecialToken, tokenBtnTex, swatchTex,
+      drawBotToken, drawFriendToken, drawSpecialToken, tokenBtnTex, botChipTex, swatchTex,
       get botTok() { return tokenBtnTex('bot'); },
       get friendTok() { return tokenBtnTex('friend'); },
       postcard, makePress, press: makePress, makeHist, hist: makeHist,
