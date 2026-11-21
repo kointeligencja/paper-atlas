@@ -215,9 +215,10 @@
   const nextId = () => { let n = 1; while (store.players.some(p => p.id === 'p' + n)) n++; return 'p' + n; };
   const mkPlayer = (token, name, progObj, level, recObj, shownArr) => ({ id: nextId(), token, name: cleanName(name), level: cleanLevel(level), prog: migrateProg(progObj).prog, rec: cleanRec(recObj), passShown: cleanPassShown(shownArr), created: Date.now() });
   const save = () => {
-    if (!allowSave || !storageOk) return;
-    try { localStorage.setItem(V2_KEY, JSON.stringify(store)); } catch (e) { storageOk = false; }
+    if (!allowSave) return;
+    try { localStorage.setItem(V2_KEY, JSON.stringify(store)); storageOk = true; } catch (e) { storageOk = false; }
   };
+  if (navigator.storage && navigator.storage.persist) { navigator.storage.persist().catch(() => { }); }
   (() => {
     try {
       const raw2 = localStorage.getItem(V2_KEY);
@@ -1250,7 +1251,7 @@
   let idleTime = 0, compareHintDone = false, compareHopSprite = null;
   const worldHintStr = () => {
     const n = nextCont();
-    return attract ? 'Tap to play' : !currentPlayer() && Q.get('done') !== 'all' ? 'Tap to play' : n ? (n.id === 'all' ? 'Tap Last round to finish the world' : 'Tap ' + n.name + ' to build it') : 'You built the whole world';
+    return attract ? 'Tap to play' : !currentPlayer() && Q.get('done') !== 'all' ? 'Tap to play' : n ? (n.id === 'all' ? 'Tap Last round to finish the world' : 'Tap any continent to build it') : 'You built the whole world';
   };
   const restZFor = idx => 0.38 + idx * 0.035;
   const CMP_LINE_HUD = 22 / 820 * 1000;
@@ -1768,12 +1769,13 @@
     if (d === 0) { killTw(cam); cam.x = k.x; cam.y = k.y; cam.h = k.h; }
     else camTo(k.x, k.y, k.h, d);
     placeTag(); if (cbase) cbase.alpha = 1; clearRound();
-    if (justAddedStickers && !attract && !picker && btn.passport) {
+    if (justAddedStickers && !attract && !picker && btn.passport && unseenStickers().length > 0) {
       justAddedStickers = false;
       setHint('New stickers in your passport');
       btn.passport._hopY = -22; btn.passport.lift = 0.24;
       tw(btn.passport, { _hopY: 0, lift: 0 }, 0.34, { cut: true });
     } else {
+      justAddedStickers = false;
       setHint(worldHintStr());
     }
     layoutHud();
@@ -1802,7 +1804,7 @@
     return false;
   };
   function placeTag() {
-    killTag(); const n = nextCont(); if (!n || attract) return;
+    killTag(); const n = nextCont(); if (!n || n.id !== 'all' || attract) return;
     const first = !CONTS.some(ct => contDone(ct)), K = worldFrame(), hu = K.h / 1000, wpp = K.h / Math.max(1, innerHeight); // world units per screen px
     const label = n.id === 'all' ? 'Last round' : first ? 'Start here' : 'Next';
     // target outline: the continent's countries, or Antarctica for the world round
@@ -2744,6 +2746,11 @@
       let maxT = 0;
       for (const id in pl.rec) if (pl.rec[id] && pl.rec[id].t > maxT) maxT = pl.rec[id].t;
       pl.rec[c.id] = { w: RD.miss || 0, t: Math.max(Date.now(), maxT + 1) };
+      if (!RD.wind && RD.ct.id !== 'all' && !prog.built.includes(c.id)) {
+        prog.built.push(c.id);
+        s._addedToProg = true;
+        justAddedStickers = true;
+      }
       if (!RD.wind) save();
     }
     s.waiting = false; s.returning = null;
@@ -2960,9 +2967,9 @@
   }
   function closePicker(liftAway = true) {
     hold = null; idleTime = 0;
+    picker = null;
     if (inp && document.activeElement === inp) inp.blur();
     clearPickerSprites(liftAway);
-    picker = null;
     updateHudToken();
     placeTag();
     setHint(worldHintStr());
@@ -2975,7 +2982,7 @@
     sendAllTwinsHome(false);
     if (mode === 'world') { snapWorldCam(); freeBaseZoom(); }
     clearPickerSprites(false);
-    picker = { kind, player: extra.player || null, isNew: !!extra.isNew, items: [], head: null, extraSprites: [] };
+    picker = { kind, player: extra.player || null, isNew: !!extra.isNew, origName: extra.player ? extra.player.name : '', items: [], head: null, extraSprites: [] };
     rebuildPicker();
   }
   function seedNameInput(p) {
@@ -2999,10 +3006,20 @@
     else openPicker('pick');
   }
   if (inp) {
-    inp.addEventListener('blur', () => { scrollTo(0, 0); });
+    inp.addEventListener('blur', () => {
+      if (picker && picker.kind === 'editName' && picker.player) {
+        picker.player.name = cleanName(inp.value);
+        save();
+      }
+      scrollTo(0, 0);
+    });
     inp.addEventListener('input', () => {
       const v = inp.value.replace(/[\r\n]/g, '').slice(0, 12);
       if (inp.value !== v) inp.value = v;
+      if (picker && picker.kind === 'editName' && picker.player) {
+        picker.player.name = cleanName(v);
+        save();
+      }
       if (picker && picker.kind === 'editName' && picker.nameSprite) {
         const s = picker.nameSprite;
         B.freeTex(s.tex);
@@ -3013,7 +3030,15 @@
     });
     inp.addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); confirmNameEdit(); }
-      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (picker && picker.kind === 'editName') { if (picker.isNew) closePicker(true); else openPicker('pick'); } }
+      else if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        if (picker && picker.kind === 'editName') {
+          const orig = cleanName(picker.origName);
+          inp.value = orig;
+          if (picker.player) { picker.player.name = orig; save(); }
+          if (picker.isNew) closePicker(true); else openPicker('pick');
+        }
+      }
     });
   }
   function pickerNoteTex(str, hudPx, maxW, sc) {
@@ -4187,35 +4212,40 @@
     }
     const n = nextCont();
     if (n && tag && tag.alpha > 0.5 && hit(tag, wx, wy, 10)) { beginRound(n); return; }
-    if (n && n.id === 'all') {
-      let hitC = countryAt(wx, wy);
-      if (!hitC) {
+    let hitCt = null;
+    const hitC = countryAt(wx, wy);
+    if (hitC) hitCt = CI[hitC.cont];
+    if (!hitCt) {
+      for (const t of TERR) {
+        if (CI[t.cont] && wx >= t.bbox[0] && wx <= t.bbox[2] && wy >= t.bbox[1] && wy <= t.bbox[3] && pipPolys(wx, wy, t.polys)) { hitCt = CI[t.cont]; break; }
+      }
+    }
+    const onAq = wx > AQ.bbox[0] && wx < AQ.bbox[2] && wy > AQ.bbox[1] && wy < AQ.bbox[3];
+    if (!hitCt && !onAq) {
+      if (n && n.id === 'all') {
         const pad = 8;
-        let bd = 1e9;
+        let best = null, bd = 1e9;
         for (const c of G.countries) {
           if (wx >= c.bbox[0] - pad && wx <= c.bbox[2] + pad && wy >= c.bbox[1] - pad && wy <= c.bbox[3] + pad) {
             const cc = c.c || [c.cx, c.cy], d = Math.hypot(cc[0] - wx, cc[1] - wy);
-            if (d < bd) { bd = d; hitC = c; }
+            if (d < bd) { bd = d; best = c; }
           }
         }
+        if (best) hitCt = CI[best.cont];
+      } else {
+        let best = null, bd = 90;
+        for (const c of G.countries) { const cc = c.c || [c.cx, c.cy]; const inb = wx > c.bbox[0] - 3 && wx < c.bbox[2] + 3 && wy > c.bbox[1] - 3 && wy < c.bbox[3] + 3; const d = Math.hypot(cc[0] - wx, cc[1] - wy) * (inb ? 0.3 : 1); if (d < bd) { bd = d; best = c; } }
+        if (best) hitCt = CI[best.cont];
       }
-      if (hitC) {
-        const ct = CI[hitC.cont];
-        if (contDone(ct)) { beginRound(ct, { replay: true, r: 0 }); return; }
-      }
-      beginRound(n);
+    }
+    if (hitCt) {
+      if (contDone(hitCt)) beginRound(hitCt, { replay: true, r: 0 });
+      else beginRound(hitCt);
       return;
     }
-    let best = null, bd = 90;
-    for (const c of G.countries) { const cc = c.c || [c.cx, c.cy]; const inb = wx > c.bbox[0] - 3 && wx < c.bbox[2] + 3 && wy > c.bbox[1] - 3 && wy < c.bbox[3] + 3; const d = Math.hypot(cc[0] - wx, cc[1] - wy) * (inb ? 0.3 : 1); if (d < bd) { bd = d; best = c; } }
-    if (!best) {
-      if (!n) { if (wx > AQ.bbox[0] && wx < AQ.bbox[2] && wy > AQ.bbox[1] && wy < AQ.bbox[3]) beginRound(CI.all, { replay: true, r: 0 }); else wakeAll(); return; }
-      setHint('Tap ' + n.name + ' to build it'); return;
-    }
-    const ct = CI[best.cont];
-    if (ct === n) beginRound(ct);
-    else if (contDone(ct)) beginRound(ct, { replay: true, r: 0 });
-    else setHint('First build ' + n.name);
+    if (n && n.id === 'all') { beginRound(n); return; }
+    if (!n) { if (onAq) beginRound(CI.all, { replay: true, r: 0 }); else wakeAll(); return; }
+    setHint('Tap any continent to build it');
   }
   function onDown(e) {
     if (isPhonePortrait()) return;
@@ -4353,7 +4383,8 @@
     }
     if (worldTap && e.pointerId === worldTap.id && mode === 'world') {
       const moved = Math.hypot(e.clientX - worldTap.sx, e.clientY - worldTap.sy);
-      if (moved >= 6) {
+      const canDragWorld = !!(worldTap.liftCandidate || twins.length > 0);
+      if (moved >= (canDragWorld ? 6 : 16)) {
         const wt = worldTap; worldTap = null;
         if (wt.liftCandidate) {
           const c = wt.liftCandidate;
@@ -4434,7 +4465,8 @@
     const cancelled = e.type === 'pointercancel';
     if (worldTap && e.pointerId === worldTap.id) {
       const wt = worldTap; worldTap = null;
-      if (!cancelled && Math.hypot(e.clientX - wt.sx, e.clientY - wt.sy) < 7 && performance.now() - wt.t < 450 && mode === 'world') {
+      const tapLim = (wt.liftCandidate || twins.length > 0) ? 7 : 16;
+      if (!cancelled && Math.hypot(e.clientX - wt.sx, e.clientY - wt.sy) < tapLim && performance.now() - wt.t < 450 && mode === 'world') {
         handleWorldTap(wt.wx, wt.wy);
       }
       return;
@@ -4601,8 +4633,13 @@
           if (pl.rec) {
             if (s._prevRec) pl.rec[c.id] = s._prevRec;
             else delete pl.rec[c.id];
-            if (!RD.wind) save();
           }
+          if (s._addedToProg) {
+            const bi = prog.built.indexOf(c.id);
+            if (bi >= 0) prog.built.splice(bi, 1);
+            s._addedToProg = false;
+          }
+          if (!RD.wind) save();
         }
         if (RD.spawning) {
           const sp = RD.spawning; RD.queue.unshift(sp); RD.spawning = null;
