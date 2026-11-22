@@ -320,7 +320,7 @@
         }
         if (st.border !== false) {
           b.c.save();
-          b.c.strokeStyle = 'rgba(66,68,82,0.45)';
+          b.c.strokeStyle = st.line || 'rgba(66,68,82,0.45)';
           b.c.lineWidth = Math.max(0.8, 1.1 * k);
           b.c.beginPath(); pathFn(b.c); b.c.stroke();
           b.c.restore();
@@ -399,7 +399,12 @@
       const px = 14 * k, py = 14 * k, pw = 272 * k, ph = 192 * k;
       const panelEdge = ctx.wob(px, py, px + pw, py + ph, 3.5 * k, 300 + ctx.sid(gameId));
       if (gameId === 'airmail') {
-        B.paper(b, panelEdge, PAP[8], 0.5);
+        // pale sky (the map's quiet palette) with two small clouds
+        B.paper(b, panelEdge, '#c6dde6', 0.34);
+        for (const [cx0, cy0, cs] of [[218, 62, 1], [62, 168, 1.15]]) {
+          const cx = px + cx0 * k, cy = py + cy0 * k, u = cs * k;
+          B.paper(b, q => { q.arc(cx - 12 * u, cy + 2 * u, 9 * u, 0, Math.PI * 2); q.moveTo(cx + 8 * u, cy + 2 * u); q.arc(cx + 2 * u, cy - 3 * u, 11 * u, 0, Math.PI * 2); q.moveTo(cx + 24 * u, cy + 4 * u); q.arc(cx + 14 * u, cy + 4 * u, 9 * u, 0, Math.PI * 2); q.rect(cx - 20 * u, cy + 2 * u, 42 * u, 11 * u); }, '#f4f1ea', 0.52);
+        }
         // cream paper dart with red and blue strips
         const cx = px + pw * 0.52, cy = py + ph * 0.52;
         const pts = (dx, dy) => [cx + dx * k, cy + dy * k];
@@ -425,15 +430,32 @@
         b.c.beginPath(); b.c.moveTo(m0[0], m0[1]); b.c.lineTo(m1[0], m1[1]); b.c.stroke();
         b.c.restore();
       } else if (gameId === 'borders') {
-        B.paper(b, panelEdge, ctx.SEA, 0.5);
+        // Border Block: the map's sea and land, a few solid orange and blue countries, cream free ones, one tiny boat
+        const ORANGE = '#e0803a', ORANGE_L = '#b9602a', BLUE = '#3466b4', BLUE_L = '#264d8c', FREE = '#f7efd9', LAND = '#e3d8bf';
+        const BC = { BR: 'o', EC: 'o', PE: 'b', VE: 'b', AR: 'b' };
+        B.paper(b, panelEdge, ctx.SEA, 0.34);
         b.c.save(); b.g.save();
         b.c.beginPath(); panelEdge(b.c); b.c.clip();
         b.g.beginPath(); panelEdge(b.g); b.g.clip();
         drawContPolys(b, 'sa', px, py, pw, ph, k, c => {
-          if (c.id === 'BR' || c.id === 'UY') return { col: K.COL.p1, relief: 0.64, pattern: 'p1' };
-          if (c.id === 'CL' || c.id === 'EC') return { col: K.COL.p2, relief: 0.64, pattern: 'p2' };
-          return { col: ctx.PALE, relief: 0.56 };
+          const t = BC[c.id];
+          if (t === 'o') return { col: ORANGE, relief: 0.6, line: ORANGE_L };
+          if (t === 'b') return { col: BLUE, relief: 0.6, line: BLUE_L };
+          if (c.id === 'GY' || c.id === 'SR' || c.id === 'GF' || c.id === 'FK') return { col: LAND, relief: 0.5 };
+          return { col: FREE, relief: 0.58 };
         });
+        // quiet ink wave ticks, as on the map
+        for (const [wx, wy] of [[34, 62], [250, 40], [40, 150], [236, 168]]) {
+          strokePaper(b, q => {
+            const x = px + wx * k, y = py + wy * k;
+            q.moveTo(x - 6 * k, y); q.quadraticCurveTo(x - 3 * k, y - 3 * k, x, y); q.quadraticCurveTo(x + 3 * k, y + 3 * k, x + 6 * k, y);
+          }, 'rgba(60,84,96,0.55)', 0.3, Math.max(0.8, 1.2 * k));
+        }
+        // one tiny red-and-white boat, as the map's
+        const bx0 = px + 244 * k, by0 = py + 118 * k, bs = 0.15 * k;
+        const boatX = dx => bx0 + (dx - 60) * bs, boatY = dy => by0 + (dy - 60) * bs;
+        B.paper(b, q => { q.moveTo(boatX(12), boatY(72)); q.lineTo(boatX(108), boatY(70)); q.lineTo(boatX(90), boatY(98)); q.lineTo(boatX(28), boatY(99)); q.closePath(); }, PAP[2], 0.5);
+        B.paper(b, q => { q.moveTo(boatX(60), boatY(8)); q.lineTo(boatX(63), boatY(66)); q.lineTo(boatX(98), boatY(63)); q.closePath(); }, PAP[0], 0.7);
         b.c.restore(); b.g.restore();
       } else if (gameId === 'mancala') {
         // Evening savanna: 4 sunset bands, low sun behind two plum hills, walking elephant, umbrella thorn, carved wood board
@@ -701,7 +723,7 @@
         B.paper(b, ctx.wob(3 * k, 3 * k, W - 3 * k, H - 3 * k, 4.5 * k, 521 + ctx.sid(gameId)), K.COL.lid, 0.36);
         drawLidPicture(b, gameId, k);
         ctx.ink(b, PG.NAME[gameId] || gameId, 16 * k, 239 * k, 36 * k, { maxW: 268 * k, col: K.COL.ink });
-        ctx.ink(b, PG.FROM[gameId] || '', 16 * k, 279 * k, 20 * k, { maxW: 268 * k, col: K.COL.dimInk });
+        ctx.ink(b, gameId === 'othello' ? 'Land and sea' : (PG.FROM[gameId] || ''), 16 * k, 279 * k, 20 * k, { maxW: 268 * k, col: K.COL.dimInk });
         // home stamps
         const homes = PG.HOME[gameId] || [];
         const sw = homes.length >= 3 ? 58 : 62, sh = 46;
@@ -812,6 +834,8 @@
       const fw = W0 - 16, fh = H0 - 16;
       const floorTex = ctx.shapeTex(Math.max(8, Math.round(fw * ks)), Math.max(8, Math.round(fh * ks)), b => {
         B.paper(b, ctx.wob(4 * ks, 4 * ks, b.w - 4 * ks, b.h - 4 * ks, 6 * ks, 4469), K.COL.trayFloor, 0.15);
+        // inner tray paper: one darker sheet so the lids sit in something
+        B.paper(b, ctx.wob(11 * ks, 11 * ks, b.w - 11 * ks, b.h - 11 * ks, 5 * ks, 4473), '#9d8560', 0.3);
       }, { noMip: true });
       box.floor = mk(floorTex, { order: 216, z: 0.10, zr: 0.02, x: X(W0 / 2), y: Y(H0 / 2), w: fw * s, h: fh * s, rot: -0.004 });
 
@@ -1563,13 +1587,34 @@
       }
     }
 
+    // The lid under the finger lifts (z up, scale 1.05) in 3 frames at 12 fps; the tap lands on release.
+    const LIFT = 0.23;
+    function liftLid(box, lid) {
+      dropLid(box, false);
+      box.press = lid;
+      lid.s.order = 221;
+      K.tw(lid.s, { lift: LIFT }, 3 / 12, { cut: true });
+      if (lid.band) { lid.band.order = 222; K.tw(lid.band, { lift: LIFT }, 3 / 12, { cut: true }); }
+    }
+    function dropLid(box, tap, p) {
+      const lid = box && box.press;
+      if (!lid) return;
+      box.press = null;
+      for (const [sp, o] of [[lid.s, 219], [lid.band, 220]]) {
+        if (!sp) continue;
+        sp.order = o;
+        K.tw(sp, { lift: 0 }, 3 / 12, { cut: true });
+      }
+      if (tap && p && boxState === box && lid.s && ctx.hit(lid.s, p.hx, p.hy, 2)) tapLid(lid, p);
+    }
+
     function boxDown(p) {
       const box = boxState;
       if (!box) return;
       if (box.celebrating) flushCelebrations(box);
       for (const lid of box.lids) {
         if (lid.s && ctx.hit(lid.s, p.hx, p.hy, 2)) {
-          tapLid(lid, p);
+          liftLid(box, lid);
           return;
         }
       }
@@ -1715,18 +1760,24 @@
     }
 
     function move(e) {
+      if (boxState && boxState.press) {
+        const p = ctx.toW(e), lid = boxState.press;
+        if (!lid.s || !ctx.hit(lid.s, p.hx, p.hy, 2)) dropLid(boxState, false);
+      }
       if ((screen === 'play' || screen === 'over') && activeGame && activeGame.move) {
         activeGame.move(e, ctx.toW(e));
       }
     }
 
     function up(e) {
+      if (boxState && boxState.press) dropLid(boxState, e.type !== 'pointercancel', ctx.toW(e));
       if ((screen === 'play' || screen === 'over') && activeGame && activeGame.up) {
         activeGame.up(e, ctx.toW(e));
       }
     }
 
     function cancel() {
+      if (boxState && boxState.press) dropLid(boxState, false);
       if (activeGame && activeGame.cancel) activeGame.cancel();
     }
 

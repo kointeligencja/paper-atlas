@@ -573,6 +573,14 @@
     const B = ctx.GFX;
     const L = PG.logic.borders;
     const G = getGraph(ctx.GEO);
+    // Local palette (art direction v2, section 4). K.COL is shared with other games and stays untouched.
+    const PAL = {
+      p1: '#e0803a', p1Line: '#b9602a',
+      p2: '#3466b4', p2Line: '#264d8c',
+      free: '#f7efd9', closed: '#c6bba2', freeLine: 'rgba(72,74,86,0.42)', closedLine: 'rgba(72,74,86,0.30)',
+      land: '#e3d8bf',
+    };
+    const Z_SHEET = 0.12, Z_FREE = 0.2, Z_CLOSED = 0.06, Z_OWNED = 0.34;
 
     let opt = { players: 1, bot: 'easy', rule: 'snort', board: 'sa' };
     let state = null;
@@ -585,6 +593,8 @@
     const pieceSprs = {};
     const markSprs = {};
     const markKinds = {};
+    const markTok = {};
+    let texCache = {};
     let previewSpr = null;
     let previewId = null;
     let previewTag = null;
@@ -757,8 +767,8 @@
         if (hasAq) ctx.ring(q, ctx.GEO.aq, 0, 0, 1);
       };
       const c = b.c;
-      c.fillStyle = ctx.TERR_PAPER;
-      c.strokeStyle = ctx.TERR_PAPER;
+      c.fillStyle = PAL.land;
+      c.strokeStyle = PAL.land;
       c.lineWidth = 0.7;
       c.lineJoin = 'round';
       c.beginPath(); drawOther(c); c.fill('evenodd'); c.stroke();
@@ -768,45 +778,27 @@
       b.g.lineJoin = 'round';
       b.g.beginPath(); drawOther(b.g); b.g.fill('evenodd'); b.g.stroke();
 
+      // The board's own countries are separate sprites (free / closed / claimed); the sheet only holds a cream base.
       const drawBoard = q => {
         for (const cc of boardC) for (const r of cc.polys) ctx.ring(q, r, 0, 0, 1);
       };
-      c.fillStyle = ctx.PALE;
-      c.strokeStyle = ctx.PALE;
+      c.fillStyle = PAL.free;
+      c.strokeStyle = PAL.free;
       c.lineWidth = 0.7;
       c.lineJoin = 'round';
       c.beginPath(); drawBoard(c); c.fill('evenodd'); c.stroke();
-      b.g.fillStyle = B.grey(0.66);
-      b.g.strokeStyle = B.grey(0.66);
+      b.g.fillStyle = B.grey(0.6);
+      b.g.strokeStyle = B.grey(0.6);
       b.g.lineWidth = 0.5;
       b.g.lineJoin = 'round';
       b.g.beginPath(); drawBoard(b.g); b.g.fill('evenodd'); b.g.stroke();
-
-      for (const cc of boardC) {
-        const d = (ctx.hs(ctx.sid(cc.id), 3) - 0.5) * 0.05;
-        c.fillStyle = ctx.shade(ctx.PALE, d);
-        c.beginPath();
-        for (const r of cc.polys) ctx.ring(c, r, 0, 0, 1);
-        c.fill('evenodd');
-      }
-      for (const cc of boardC) {
-        for (let pass = 0; pass < 2; pass++) {
-          c.strokeStyle = `rgba(72,74,86,${pass ? 0.3 : 0.5})`;
-          c.lineWidth = pass ? 0.3 : 0.42;
-          c.setLineDash(pass ? [] : [7, 0.6, 3, 0.4]);
-          c.beginPath();
-          for (const r of cc.polys) ctx.ring(c, r, pass * 0.25, -pass * 0.2, 1);
-          c.stroke();
-        }
-        c.setLineDash([]);
-      }
 
       sheetSpr = K.spr(B.tex(b), {
         x: (reg[0] + reg[2]) / 2,
         y: (reg[1] + reg[3]) / 2,
         w,
         h,
-        z: 0.20,
+        z: Z_SHEET,
         zr: 0.04,
         order: 30,
         own: true,
@@ -821,186 +813,209 @@
       return Math.max(1, B.size()[1] / Math.max(1, window.innerHeight));
     }
 
-    function bbPiece(c, p) {
+    // One plain sheet of paper per country: no hatching, no dots. kind: p1 | p2 | free | closed.
+    function bbPaper(c, kind, maxTex) {
       const scrPpu = baseScrPpu();
       const dpr = dprScale();
       const pad = 4;
       const md = Math.max(c.bw, c.bh, 1);
-      const maxPpu = (1400 - pad * 2) / md;
+      const maxPpu = (maxTex - pad * 2) / md;
       const ppu = Math.max(1, Math.min(scrPpu * dpr, maxPpu));
       const k = ppu / scrPpu; // texture px per base-frame screen px
       const b = B.bake(c.bw * ppu + pad * 2, c.bh * ppu + pad * 2);
       const ox = c.cx - b.w / (2 * ppu);
       const oy = c.cy - b.h / (2 * ppu);
+      const fill = PAL[kind];
+      const line = kind === 'p1' ? PAL.p1Line : kind === 'p2' ? PAL.p2Line : (kind === 'free' ? PAL.freeLine : PAL.closedLine);
+      const relief = (kind === 'p1' || kind === 'p2') ? 0.72 : (kind === 'free' ? 0.66 : 0.4);
+
+      b.c.fillStyle = fill;
+      b.c.fillRect(0, 0, b.w, b.h);
+      b.c.strokeStyle = line;
+      b.c.lineWidth = 1.2 * k;
+      b.c.lineJoin = 'round';
+      b.c.beginPath();
+      for (const r of c.polys) ctx.ring(b.c, r, ox, oy, ppu);
+      b.c.stroke();
 
       b.g.save();
       b.g.beginPath();
       for (const r of c.polys) ctx.ring(b.g, r, ox, oy, ppu);
       b.g.clip('evenodd');
-
-      const baseCol = p === 1 ? K.COL.p1 : K.COL.p2;
-      b.c.fillStyle = baseCol;
-      b.c.fillRect(0, 0, b.w, b.h);
-      b.g.fillStyle = B.grey(0.55);
+      b.g.fillStyle = B.grey(relief);
       b.g.fillRect(0, 0, b.w, b.h);
-
-      if (p === 1) {
-        // Raised diagonal strips (45 deg, 3 px wide, every 10 px, shade -0.18, relief 0.72)
-        const step = 10 * k;
-        const sw = 3 * k;
-        const pat = q => {
-          q.beginPath();
-          for (let d = -b.h; d < b.w + b.h; d += step) {
-            q.moveTo(d, 0);
-            q.lineTo(d + sw, 0);
-            q.lineTo(d + sw - b.h, b.h);
-            q.lineTo(d - b.h, b.h);
-            q.closePath();
-          }
-          q.fill();
-        };
-        b.c.fillStyle = K.COL.p1Dark;
-        pat(b.c);
-        b.g.fillStyle = B.grey(0.72);
-        pat(b.g);
-      } else {
-        // Punched dots (diameter 4.5 px, every 12 px on staggered grid, shade +0.25, relief 0.25)
-        const step = 12 * k;
-        const rowStep = step * 0.866;
-        const rad = 2.25 * k;
-        const pat = q => {
-          q.beginPath();
-          for (let row = 0, y = rowStep * 0.5; y < b.h + rad; row++, y += rowStep) {
-            const x0 = (row % 2) ? step * 0.5 : 0;
-            for (let x = x0; x < b.w + rad; x += step) {
-              q.moveTo(x + rad, y);
-              q.arc(x, y, rad, 0, Math.PI * 2);
-            }
-          }
-          q.fill();
-        };
-        b.c.fillStyle = K.COL.p2Light;
-        pat(b.c);
-        b.g.fillStyle = B.grey(0.25);
-        pat(b.g);
-      }
-
-      b.g.restore();
-      const tex = B.tex(b);
-      return { tex, w: b.w / ppu, h: b.h / ppu };
-    }
-
-    function bbMark(c, kind) {
-      const scrPpu = baseScrPpu();
-      const dpr = dprScale();
-      const pad = 3;
-      const md = Math.max(c.bw, c.bh, 1);
-      const maxPpu = (512 - pad * 2) / md;
-      const ppu = Math.max(1, Math.min(scrPpu * dpr, maxPpu));
-      const k = ppu / scrPpu;
-      const b = B.bake(c.bw * ppu + pad * 2, c.bh * ppu + pad * 2);
-      const ox = c.cx - b.w / (2 * ppu);
-      const oy = c.cy - b.h / (2 * ppu);
-
-      const col = kind === 'p1' ? K.COL.p1 : (kind === 'p2' ? K.COL.p2 : K.COL.closed);
-      b.c.fillStyle = col;
-      b.c.fillRect(0, 0, b.w, b.h);
-
-      b.g.save();
-      b.g.beginPath();
-      for (const r of c.polys) ctx.ring(b.g, r, ox, oy, ppu);
-      b.g.clip('evenodd');
-      b.g.fillStyle = B.grey(0.05);
-
-      if (kind === 'p1' || kind === 'closed') {
-        const step = 14 * k;
-        const sw = 2 * k;
-        b.g.beginPath();
-        for (let d = -b.h; d < b.w + b.h; d += step) {
-          b.g.moveTo(d, 0);
-          b.g.lineTo(d + sw, 0);
-          b.g.lineTo(d + sw - b.h, b.h);
-          b.g.lineTo(d - b.h, b.h);
-          b.g.closePath();
-        }
-        b.g.fill();
-      }
-      if (kind === 'p2' || kind === 'closed') {
-        const step = 14 * k;
-        const rowStep = step * 0.866;
-        const rad = 1.75 * k;
-        b.g.beginPath();
-        for (let row = 0, y = rowStep * 0.5; y < b.h + rad; row++, y += rowStep) {
-          const x0 = (row % 2) ? step * 0.5 : 0;
-          for (let x = x0; x < b.w + rad; x += step) {
-            b.g.moveTo(x + rad, y);
-            b.g.arc(x, y, rad, 0, Math.PI * 2);
-          }
-        }
-        b.g.fill();
-      }
       b.g.restore();
 
-      const tex = B.tex(b);
-      return { tex, w: b.w / ppu, h: b.h / ppu };
+      return { tex: B.tex(b), w: b.w / ppu, h: b.h / ppu };
     }
 
-    function applyMarkNow(id, kind, animate) {
-      if (markSprs[id]) { K.kill(markSprs[id]); delete markSprs[id]; }
+    function bbPiece(c, p) { return bbPaper(c, p === 1 ? 'p1' : 'p2', 1400); }
+
+    // Free / closed paper is cached per country, so a turn only swaps textures.
+    function markTex(id, kind) {
+      const e = texCache[id] || (texCache[id] = {});
+      return e[kind] || (e[kind] = bbPaper(ctx.C[id], kind, 512));
+    }
+
+    function freeTexCache() {
+      for (const id of Object.keys(texCache)) {
+        for (const kind of Object.keys(texCache[id])) B.freeTex(texCache[id][kind].tex);
+      }
+      texCache = {};
+    }
+
+    function killMarks() {
+      for (const k of Object.keys(markSprs)) { K.kill(markSprs[k]); delete markSprs[k]; delete markKinds[k]; delete markTok[k]; }
+    }
+
+    // The light set for the player to move: free and legal = cream, everything else unowned = grey-beige.
+    function markTargets() {
+      const out = {};
+      if (!state) return out;
+      for (const id of board.ids) {
+        if (state.owner[id]) continue;
+        out[id] = (!state.over && L.can(state, G, id, state.turn)) ? 'free' : 'closed';
+      }
+      return out;
+    }
+
+    function placeMark(id, kind) {
       const c = ctx.C[id];
-      if (!c || !kind) { delete markKinds[id]; return; }
-      const m = bbMark(c, kind);
-      const lift0 = (animate && !K.isFast()) ? 0.12 : 0;
-      const s = K.spr(m.tex, {
-        x: c.cx,
-        y: c.cy,
-        w: m.w,
-        h: m.h,
-        z: 0.21,
-        zr: 0.04,
-        order: 34,
-        lift: lift0,
-        own: true,
-      });
-      if (lift0 > 0) K.tw(s, { lift: 0 }, 2 / 12, { cut: true });
-      markSprs[id] = s;
+      if (!c) return;
+      const m = markTex(id, kind);
+      markTok[id] = (markTok[id] || 0) + 1;
+      let s = markSprs[id];
+      if (!s) {
+        s = K.spr(m.tex, { x: c.cx, y: c.cy, w: m.w, h: m.h, z: Z_FREE, zr: 0.1, order: 34, own: false });
+        markSprs[id] = s;
+      } else {
+        s.tex = m.tex; s.w = m.w; s.h = m.h;
+      }
+      s.z = kind === 'free' ? Z_FREE : Z_CLOSED;
+      s.order = kind === 'free' ? 34 : 33;
       markKinds[id] = kind;
     }
 
-    function syncMarks(animate, onDone) {
-      const target = L.marks(state, G);
+    // A country that closes sinks in two frames, then stays pressed flat.
+    function sinkMark(id, delay) {
+      const tok = (markTok[id] = (markTok[id] || 0) + 1);
+      const m = markTex(id, 'closed');
+      const step = (fr, fn) => K.after((delay + fr) / 12, () => {
+        const s = markSprs[id];
+        if (destroyed || markTok[id] !== tok || !s) return;
+        fn(s);
+      });
+      step(0, s => { s.tex = m.tex; s.w = m.w; s.h = m.h; s.order = 33; s.z = (Z_FREE + Z_CLOSED) * 0.5; });
+      step(1, s => { s.z = Z_CLOSED; });
+      markKinds[id] = 'closed';
+    }
+
+    // mode: 'now' (instant), 'stage' (one bake per frame, no motion), 'anim' (neighbours sink one after another)
+    function syncMarks(mode, onDone, fromId) {
+      const target = markTargets();
       for (const id of Object.keys(markSprs)) {
-        if (!target[id]) {
-          K.kill(markSprs[id]);
-          delete markSprs[id];
-          delete markKinds[id];
-        }
+        if (!target[id]) { K.kill(markSprs[id]); delete markSprs[id]; delete markKinds[id]; delete markTok[id]; }
       }
-      const todo = [];
-      for (const id of Object.keys(target)) {
-        if (markKinds[id] !== target[id]) {
-          todo.push([id, target[id]]);
-        }
-      }
-      if (!todo.length) {
-        if (onDone) onDone();
-        return;
-      }
-      if (!animate || K.isFast()) {
-        for (const [id, kind] of todo) applyMarkNow(id, kind, false);
+      const todo = Object.keys(target).filter(id => markKinds[id] !== target[id]);
+      if (!todo.length) { if (onDone) onDone(); return; }
+      if (mode === 'now' || K.isFast()) {
+        for (const id of todo) placeMark(id, target[id]);
         if (onDone) onDone();
         return;
       }
       const myGen = gen;
-      marksBaking += todo.length;
-      for (const [id, kind] of todo) {
+      if (mode === 'stage') {
+        for (const id of todo) {
+          K.job(() => {
+            if (destroyed || myGen !== gen) return;
+            const kind = markTargets()[id];
+            if (kind && markKinds[id] !== kind) placeMark(id, kind);
+          });
+        }
+        if (onDone) onDone();
+        return;
+      }
+      const run = () => {
+        const tg = markTargets();
+        const src = fromId && ctx.C[fromId];
+        const closing = [];
+        for (const id of Object.keys(tg)) {
+          if (markKinds[id] === tg[id]) continue;
+          if (tg[id] === 'closed' && markSprs[id]) closing.push(id);
+          else placeMark(id, tg[id]);
+        }
+        if (src) {
+          const d2 = id => { const q = ctx.C[id]; return (q.cx - src.cx) ** 2 + (q.cy - src.cy) ** 2; };
+          closing.sort((a, b2) => d2(a) - d2(b2));
+        }
+        closing.forEach((id, i) => sinkMark(id, i));
+        if (onDone) onDone();
+      };
+      const need = todo.filter(id => !(texCache[id] && texCache[id][target[id]]));
+      if (!need.length) { run(); return; }
+      marksBaking += need.length;
+      for (const id of need) {
         K.job(() => {
           if (destroyed || myGen !== gen) return;
           marksBaking = Math.max(0, marksBaking - 1);
-          applyMarkNow(id, kind, true);
-          if (marksBaking === 0 && onDone) onDone();
+          markTex(id, target[id]);
+          if (marksBaking === 0) run();
         });
       }
+    }
+
+    // ---- Score: two small paper chips under the hint line (orange count, blue count) ----
+    const scoreSprs = [null, null];
+    const scoreN = [-1, -1];
+
+    function scoreTex(p, n) {
+      const t = ctx.shapeTex(96, 96, b => {
+        B.paper(b, q => q.arc(48, 48, 42, 0, Math.PI * 2), p === 1 ? PAL.p1 : PAL.p2, 0.6);
+        b.c.save();
+        b.c.strokeStyle = p === 1 ? PAL.p1Line : PAL.p2Line;
+        b.c.lineWidth = 2.5;
+        b.c.beginPath(); b.c.arc(48, 48, 42, 0, Math.PI * 2); b.c.stroke();
+        b.c.restore();
+        ctx.ink(b, String(n), 48, 50, n >= 10 ? 46 : 52, { align: 'center', col: '#fbf7ea' });
+      }, { noMip: true });
+      t.lw = 96; t.lh = 96;
+      return t;
+    }
+
+    function clearScore() {
+      for (let i = 0; i < 2; i++) { if (scoreSprs[i]) { K.kill(scoreSprs[i]); scoreSprs[i] = null; } scoreN[i] = -1; }
+    }
+
+    function layoutScore() {
+      const hs = ctx.hint();
+      if (!hs || !scoreSprs[0]) return;
+      const size = ctx.clamp(hs.h * 1.05, 34, 56);
+      const x0 = hs.x - hs.w * 0.5;
+      const y = hs.y + hs.h * 0.5 + 10 + size * 0.5;
+      for (let i = 0; i < 2; i++) {
+        const q = scoreSprs[i];
+        if (!q) continue;
+        q.w = size; q.h = size;
+        q.x = x0 + size * 0.5 + 4 + i * (size + 10);
+        q.y = y;
+      }
+    }
+
+    function updateScore(pop) {
+      if (!state || !board) return;
+      const n = [0, 0];
+      for (const id of board.ids) if (state.owner[id]) n[state.owner[id] - 1]++;
+      for (let i = 0; i < 2; i++) {
+        if (scoreSprs[i] && scoreN[i] === n[i]) continue;
+        const had = !!scoreSprs[i];
+        if (scoreSprs[i]) K.kill(scoreSprs[i]);
+        scoreSprs[i] = K.spr(scoreTex(i + 1, n[i]), {
+          hud: true, x: 0, y: 0, w: 48, h: 48, z: 0.12, zr: 0.04, order: 201, rot: i ? 0.06 : -0.08, lift: 0, own: true,
+        });
+        scoreN[i] = n[i];
+        if (pop && had && !K.isFast()) { scoreSprs[i].lift = 0.3; K.tw(scoreSprs[i], { lift: 0 }, 2 / 12, { cut: true }); }
+      }
+      layoutScore();
     }
 
     function makeCountryTag(c) {
@@ -1045,8 +1060,8 @@
         y: c.cy,
         w: pc.w,
         h: pc.h,
-        z: 0.24,
-        zr: 0.05,
+        z: Z_OWNED,
+        zr: 0.12,
         order: 40,
         lift: 0.6,
         rot: 3 * ctx.DEG,
@@ -1319,7 +1334,8 @@
         ctx.speakText(msg);
         return;
       }
-      // Unclaimed but illegal due to adjacency rule
+      // Unclaimed but illegal due to adjacency rule: the grey paper itself wobbles for three frames
+      if (markSprs[id]) ctx.startWobble(markSprs[id]);
       const p = state.turn;
       const forbid = state.rule === 'snort' ? (3 - p) : p;
       const nbs = (board.adj && board.adj[id]) || [];
@@ -1438,7 +1454,7 @@
     function bakeEndSprites() {
       clearEndUi();
       const win = state.winner;
-      const colr = win === 1 ? K.COL.p1 : K.COL.p2;
+      const colr = win === 1 ? PAL.p1 : PAL.p2;
       const line1 = 'No more room!';
       const line2 = playerName(win) + ' made the last move and wins the map';
       ribbonSpr = K.ribbon([line1, line2], colr);
@@ -1456,8 +1472,6 @@
       if (!state || !state.over || destroyed) return;
       const lines = bakeEndSprites();
       ribbonT0 = ctx.now();
-      const W = 1000 * ctx.asp();
-      K.confetti(W * 0.5, ribbonSpr.y, 24, [K.COL.p1, K.COL.p2]);
       ctx.sfx.wake();
       updateTurnDisplay(true);
       showHint(playerName(state.winner) + ' wins');
@@ -1551,26 +1565,21 @@
       } else {
         clearPreview();
         const pc = bbPiece(c, mover);
-        s = K.spr(pc.tex, {
-          x: c.cx,
-          y: c.cy,
-          w: pc.w,
-          h: pc.h,
-          z: 0.24,
-          zr: 0.05,
-          order: 40,
-          lift: K.isFast() ? 0 : 0.6,
-          rot: K.isFast() ? 0 : 3 * ctx.DEG,
-          own: true,
-        });
+        s = K.spr(pc.tex, { x: c.cx, y: c.cy, w: pc.w, h: pc.h, z: Z_OWNED, zr: 0.12, order: 40, own: true });
         tag = makeCountryTag(c);
       }
+      s.zr = 0.12;
+      s.lift = 0;
+      s.rot = 0;
+      s.sc = 1;
+      s.z = Z_OWNED;
 
       pieceSprs[id] = s;
       if (markSprs[id]) {
         K.kill(markSprs[id]);
         delete markSprs[id];
         delete markKinds[id];
+        delete markTok[id];
       }
 
       const myGen = gen;
@@ -1591,21 +1600,39 @@
       const onLand = () => {
         if (destroyed || myGen !== gen) return;
         placing = false;
-        K.snd.slap(false);
         if (!K.isFast()) ctx.speakCountry(c, false);
-        syncMarks(!fromApi, () => {
+        updateScore(true);
+        syncMarks(fromApi ? 'now' : 'anim', () => {
           if (destroyed || myGen !== gen) return;
           afterMovePlaced();
-        });
+        }, id);
       };
 
       if (K.isFast()) {
-        s.lift = 0;
-        s.rot = 0;
+        K.snd.slap(false);
         onLand();
       } else {
+        // The claim, at 12 fps: four frames down from above (ease-out), one frame pressed, then still.
         placing = true;
-        K.tw(s, { lift: 0, rot: 0 }, 0.25, { cut: true, done: onLand });
+        const ox = -baseCam.h * 0.012, oy = -baseCam.h * 0.02;
+        const frame = f => {
+          if (!s || destroyed) return;
+          const u = Math.min(1, f / 4), e = 1 - (1 - u) * (1 - u);
+          s.z = Z_OWNED + (1 - e) * 1.46;
+          s.sc = 1 + (1 - e) * 0.1 - (f === 5 ? 0.02 : 0);
+          s.rot = -(1 - e) * 0.1;
+          s.x = c.cx + ox * (1 - e);
+          s.y = c.cy + oy * (1 - e);
+        };
+        frame(0);
+        for (let f = 1; f <= 6; f++) {
+          K.after(f / 12, () => {
+            if (destroyed || myGen !== gen) return;
+            frame(f);
+            if (f === 4) K.snd.slap(false);
+            if (f === 5) onLand();
+          });
+        }
       }
       return true;
     }
@@ -1624,8 +1651,8 @@
           y: c.cy,
           w: pc.w,
           h: pc.h,
-          z: 0.24,
-          zr: 0.05,
+          z: Z_OWNED,
+          zr: 0.12,
           order: 40,
           lift: 0,
           rot: 0,
@@ -1671,7 +1698,8 @@
           delete pieceSprs[id];
         }
       }
-      syncMarks(false);
+      syncMarks('now');
+      updateScore(false);
       ctx.sfx.back();
       updateTurnDisplay(false);
       showHint(playerName(state.turn) + ', your turn');
@@ -1708,7 +1736,7 @@
       clearHintRing();
       clearEndUi();
       for (const k of Object.keys(pieceSprs)) { K.kill(pieceSprs[k]); delete pieceSprs[k]; }
-      for (const k of Object.keys(markSprs)) { K.kill(markSprs[k]); delete markSprs[k]; delete markKinds[k]; }
+      killMarks();
 
       K.hideMat();
       ctx.clearTags();
@@ -1720,6 +1748,9 @@
       computeBaseCam();
       bakeBoardSheet();
       bakeBridges();
+      freeTexCache();
+      syncMarks(K.isFast() ? 'now' : 'stage');
+      updateScore(false);
 
       const immediate = !!(meta && meta.immediate) || K.isFast();
       if (immediate) {
@@ -1916,6 +1947,10 @@
         const s = pieceSprs[id];
         if (s && s.wob !== undefined) s.rot = ctx.wobbleRot(s);
       }
+      for (const id of Object.keys(markSprs)) {
+        const s = markSprs[id];
+        if (s && s.wob !== undefined) s.rot = ctx.wobbleRot(s);
+      }
       if (againBtn && againBtn.wob !== undefined) {
         againBtn.rot = (againBtn.baseTilt || 0) + ctx.wobbleRot(againBtn);
       }
@@ -1927,6 +1962,7 @@
     function layoutHud() {
       if (!state || destroyed) return;
       updateTurnDisplay(false);
+      layoutScore();
       if (state.over) layoutEndUi();
     }
 
@@ -1951,8 +1987,10 @@
       bakeBoardSheet();
       bakeBridges();
       rebuildPiecesFromState();
-      for (const k of Object.keys(markSprs)) { K.kill(markSprs[k]); delete markSprs[k]; delete markKinds[k]; }
-      syncMarks(false);
+      killMarks();
+      freeTexCache();
+      syncMarks('stage');
+      updateScore(false);
       if (state.over && ribbonSpr) {
         bakeEndSprites();
       }
@@ -1973,7 +2011,9 @@
       clearBridges();
       if (sheetSpr) { K.kill(sheetSpr); sheetSpr = null; }
       for (const k of Object.keys(pieceSprs)) { K.kill(pieceSprs[k]); delete pieceSprs[k]; }
-      for (const k of Object.keys(markSprs)) { K.kill(markSprs[k]); delete markSprs[k]; delete markKinds[k]; }
+      killMarks();
+      freeTexCache();
+      clearScore();
       K.turnDisplay(ctx.currentPlayer(), null, false);
     }
 

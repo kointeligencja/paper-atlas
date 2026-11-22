@@ -434,8 +434,36 @@
     const SEATX = 500, RAIL_SY = 368;
     const W = (x, y) => [GT[0] + x * PS, GT[1] + (y - SBY) * PS];
     const FLOOR = 0.3;
+    // upright page: the green shore along the top, the board, the atoll seat, the rail. Scene units, board centre y = SBY.
+    const PORT_ASP = 1.15, PORT_W = 920;
+    const P_TOP = -452, P_BOT = 496, P_COAST = -326, P_SEAT1 = -360, P_SEAT2 = 386, P_RAIL = 468;
+    const P_H0 = (P_BOT - P_TOP) * PS;     // the page height (world) that holds all of it
+    // The page: wide as before; in portrait narrower and taller so the camera (fitting the page to the width) fills the screen.
+    function pageSpec() {
+      const asp = ctx.asp();
+      if (asp >= PORT_ASP) return { w: Math.round(1354 * PAGE_SCALE), h: Math.round(670 * PAGE_SCALE), key: 'L' };
+      const mt = Math.min(0.32, (ctx.topHudBottom() + (ctx.PHONE ? 6 : 10)) / 1000);
+      const mb = ctx.PHONE ? 0.015 : 0.042, mlr = ctx.PHONE ? 0.02 : 0.064, bw = ctx.PHONE ? 20 : 52;
+      const k = (1 - mt - mb) / (1 - mlr);
+      let w = PORT_W, h = Math.round(k * (w + 2 * bw) / asp - 2 * bw);
+      if (h < P_H0) { h = Math.round(P_H0); w = Math.round(clamp((h + 2 * bw) * asp / k - 2 * bw, PORT_W, 1500)); }
+      w = Math.round(w / 12) * 12; h = Math.round(h / 12) * 12;
+      return { w, h: Math.max(h, Math.round(P_H0)), key: `${w}x${h}` };
+    }
+    function setLayout(spec) {
+      if (spec.key === 'L') { PL = null; return; }
+      const ex = Math.max(0, spec.h / PS - (P_BOT - P_TOP));
+      const top = P_TOP - ex * 0.4, bot = P_BOT + ex * 0.6;
+      PL = {
+        ex, top, bot, cy: (top + bot) / 2, wM: spec.w / PS, hM: spec.h / PS,
+        seat1: [0, P_SEAT1 - ex * 0.12], seat2: [0, P_SEAT2 + ex * 0.2], rail: P_RAIL + ex * 0.6,
+      };
+      PL.railW = Math.min(PL.wM - 36, 600);
+    }
 
     let page = null;
+    let pageKey = '';
+    let PL = null;   // the portrait layout (scene units) or null for the wide page
     let boardSpr = null;
     let lastPortrait = null;
     let curN = 8;
@@ -501,7 +529,7 @@
     }
     function nameOfSide(side) { return K.displayName(whoOfSide(side)); }
 
-    function isPortrait() { return ctx.asp() < 0.9; }
+    function isPortrait() { return ctx.asp() < PORT_ASP; }
     function sqSize() { return BOARD_GRID / (st ? st.n : opt.size); }
     function sqCenter(r, c) {
       const sq = sqSize();
@@ -527,14 +555,19 @@
       if (T.wave) { B.freeTex(T.wave); T.wave = null; }
     }
 
+    // true when the page was (re)built, so the caller lays the trays out again
     function ensurePage() {
       K.hideMat();
-      if (page) return;
+      const spec = pageSpec();
+      if (page && pageKey === spec.key) return false;
+      if (page) clearPage();
+      pageKey = spec.key;
+      setLayout(spec);
       page = K.gamePage({
         cx: GT[0],
-        cy: GT[1] + Math.round(39 * PAGE_SCALE),
-        w: Math.round(1354 * PAGE_SCALE),
-        h: Math.round(670 * PAGE_SCALE),
+        cy: PL ? W(0, PL.cy)[1] : GT[1] + Math.round(39 * PAGE_SCALE),
+        w: spec.w,
+        h: spec.h,
         frameOrder: 6,
         tableOrder: -20,
       });
@@ -562,6 +595,7 @@
       }, { noMip: true });
       page.spr(tex, { x: IN.cx, y: IN.cy, w: pw * PS, h: ph * PS, z: 0.05 * PS, zr: 0.08 * PS, order: -5, own: true });
 
+      if (PL) { buildPortraitShore(); return true; }
       // the land player's shore (left): three strata of green and a sand coast
       const SW = 340, SCX = x0S - 18 + SW / 2;
       const coast = (y, k) => -428 - k + Math.sin(y * 0.011 + 1) * 16 + Math.sin(y * 0.029 + k) * 7 + 26 * Math.exp(-(((y - SBY) / 110) ** 2));
@@ -579,18 +613,46 @@
       const sp = W(SCX, cyS);
       page.spr(shoreTex, { x: sp[0], y: sp[1], w: (SW + 30) * PS, h: shoreH * PS, z: 0.12 * PS, zr: 0.08 * PS, order: 2, own: true });
 
-      // the outside wave crests (the map's own), bobbing a little
+      addCrests([[390, -190, 44], [610, -90, 52], [420, 220, 48], [640, 250, 40], [-345, 250, 40], [-350, -200, 44]]);
+      return true;
+    }
+
+    // the outside wave crests (the map's own), bobbing a little
+    function addCrests(list) {
       T.wave = shape(60, 24, 3, b => {
         b.c.translate(-30, -12); b.g.translate(-30, -12); b.c.scale(0.5, 0.5); b.g.scale(0.5, 0.5);
         P(b, x => { x.moveTo(8, 28); x.quadraticCurveTo(32, 8, 60, 24); x.quadraticCurveTo(86, 36, 112, 20); x.quadraticCurveTo(86, 44, 56, 32); x.quadraticCurveTo(30, 18, 8, 28); x.closePath(); }, INKSEA, 0.45);
         P(b, circ(58, 13, 4.2), FOAM, 0.68);
       });
-      for (const [x, y, w] of [[390, -190, 44], [610, -90, 52], [420, 220, 48], [640, 250, 40], [-345, 250, 40], [-350, -200, 44]]) {
+      for (const [x, y, w] of list) {
         const p = W(x, y);
         const s = page.spr(T.wave, { x: p[0], y: p[1], w: w * PS, h: w * 0.4 * PS, z: 0.09 * PS, zr: 0.025 * PS, order: 3, own: false });
         s.by = p[1];
         bobCrests.push(s);
       }
+    }
+
+    // the upright page: the land player's shore runs along the top edge (green strata, sand coast facing the board)
+    function buildPortraitShore() {
+      const ex = PL.ex, wM = PL.wM;
+      const sw = wM + 32, top = PL.top - 16, bot = P_COAST + 60, sh = bot - top, cyT = (top + bot) / 2;
+      const coast = (x, k) => P_COAST - k + Math.sin(x * 0.011 + 1) * 16 + Math.sin(x * 0.029 + k) * 7 + 26 * Math.exp(-((x / 110) ** 2));
+      const shoreTex = shape(sw, sh, 1.0, b => {
+        const band = (k, col, rel) => P(b, q => {
+          q.moveTo(-sw / 2, -sh / 2);
+          for (let x = -sw / 2; x <= sw / 2 + 5; x += 10) q.lineTo(x, coast(x, k) - cyT);
+          q.lineTo(sw / 2, -sh / 2);
+          q.closePath();
+        }, col, rel);
+        band(0, SAND, 0.5); band(20, GREEN, 0.62);
+        band(90 + ex * 0.3, shade(GREEN, -0.1), 0.7); band(130 + ex * 0.4, GREEN_D, 0.78);
+      }, { noMip: true });
+      const sp = W(0, cyT);
+      page.spr(shoreTex, { x: sp[0], y: sp[1], w: sw * PS, h: sh * PS, z: 0.12 * PS, zr: 0.08 * PS, order: 2, own: true });
+      const cr = [[-205, 396, 44], [215, 402, 40], [-130, 440, 34]];
+      const side = wM / 2 - 292;
+      if (side > 70) for (const sg of [-1, 1]) cr.push([sg * (292 + side / 2), -120, 44], [sg * (292 + side / 2), 150, 40]);
+      addCrests(cr);
     }
 
     // =========================== the board: a patch of the same sea in a neatline ===========================
@@ -791,16 +853,23 @@
     let seatTex = { 1: null, 2: null };
 
     function railGeom(n) {
-      const total = n * n, pitch = 1216 / total, RS = Math.min(1.5, pitch / 19);
+      const total = n * n, pitch = (PL ? PL.railW : 1216) / total, RS = Math.min(1.5, pitch / 19);
       return { total, pitch, RS, wx: i => (i - (total - 1) / 2) * pitch };
     }
     function pipSz() { return 24 * railGeom(curN).RS * PS; }
     function pipPos(side, idx) {
       const L = railGeom(curN);
-      return W(L.wx(side === 1 ? idx : L.total - 1 - idx), RAIL_SY);
+      return W(L.wx(side === 1 ? idx : L.total - 1 - idx), railSY());
     }
-    function seatPos(side) { return W(side === 1 ? -SEATX : SEATX, SBY); }
+    // the atoll and the rail drop a little when the tiles (and the seat) are bigger, on the 6x6 board
+    function bigShift() { return 50 * (Math.min(1.35, curU / PS) - 1); }
+    function railSY() { return PL ? PL.rail + bigShift() : RAIL_SY; }
+    function seatPos(side) {
+      if (PL) return W(...(side === 1 ? PL.seat1 : [PL.seat2[0], PL.seat2[1] + bigShift()]));
+      return W(side === 1 ? -SEATX : SEATX, SBY);
+    }
     function badgePos(side) {
+      if (PL) { const sp = side === 1 ? PL.seat1 : PL.seat2; return W(sp[0] + (side === 1 ? -108 : 108), sp[1] + (side === 1 ? 0 : bigShift())); }
       const L = railGeom(curN);
       return W((side === 1 ? -1 : 1) * (L.total / 2 * L.pitch + 42), RAIL_SY);
     }
@@ -841,7 +910,7 @@
         for (let i = 0; i < L.total; i++) P(b, circ(L.wx(i), 0, 5.2 * L.RS), shade(SAND, -0.12), 0.34);
         P(b, q => q.rect(-1.5, -17 * L.RS, 3, 34 * L.RS), INKSEA, 0.7);
       }, { noMip: true });
-      const rp = W(0, RAIL_SY);
+      const rp = W(0, railSY());
       railSpr = K.spr(rTex, { x: rp[0], y: rp[1], w: rw * PS, h: rh * PS, z: 0.2 * PS, zr: 0.06 * PS, order: 10, own: true });
       const cnt = logic.count(st);
       const counts = { 1: cnt.x, 2: cnt.o };
@@ -1591,9 +1660,9 @@
       const line1 = nameOfSide(1) + ' ' + cnt.x + '   ' + nameOfSide(2) + ' ' + cnt.o;
       const line2 = endLine2();
       endUi = {
-        strip: labelSpr(line1, 40, BLUE_D, LABEL, 500, -110, 0.03),
-        again: labelSpr('Play again', 29, GREEN, LABEL, 500, 150, -0.02),
-        games: labelSpr('Games', 29, PAP[8], ctx.INK, 500, 215, 0.02),
+        strip: labelSpr(line1, 40, BLUE_D, LABEL, ...(PL ? [0, PL.seat2[1] - 14] : [500, -110]), 0.03),
+        again: labelSpr('Play again', 29, GREEN, LABEL, ...(PL ? [-112, PL.seat2[1] + 50] : [500, 150]), -0.02),
+        games: labelSpr('Games', 29, PAP[8], ctx.INK, ...(PL ? [112, PL.seat2[1] + 50] : [500, 215]), 0.02),
       };
       if (celebrate) {
         if (ctx.sfx && ctx.sfx.wake) ctx.sfx.wake();
@@ -1691,9 +1760,10 @@
     }
     function layoutHud() {
       if (!st || destroyed) return;
-      ensurePage();
-      const pNow = isPortrait();
-      if (pNow !== lastPortrait) buildTrays();
+      if (ensurePage()) {
+        buildTrays();
+        if (endShown) buildEndUi(false);
+      }
       frameCamera(true);
       if (!st.over) showTurnDisplay(st.turn, false);
     }
