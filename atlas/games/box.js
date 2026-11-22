@@ -346,6 +346,55 @@
       q.restore();
     }
 
+    function strokePaper(b, path, col, rel, lw, cap) {
+      for (const [x, st] of [[b.c, col], [b.g, B.grey(rel)]]) {
+        x.save();
+        x.strokeStyle = st;
+        x.lineWidth = lw;
+        x.lineCap = cap || 'round';
+        x.lineJoin = 'round';
+        x.beginPath();
+        path(x);
+        x.stroke();
+        x.restore();
+      }
+    }
+
+    function domePaper(b, x, y, r, col, r0, r1) {
+      const c = b.c, g = b.g;
+      c.fillStyle = col;
+      c.beginPath();
+      c.arc(x, y, r, 0, Math.PI * 2);
+      c.fill();
+      g.save();
+      g.translate(x, y);
+      const gr = g.createRadialGradient(0, 0, 0, 0, 0, r);
+      gr.addColorStop(0, B.grey(r1));
+      gr.addColorStop(0.6, B.grey(r0 + (r1 - r0) * 0.75));
+      gr.addColorStop(1, B.grey(r0));
+      g.fillStyle = gr;
+      g.beginPath();
+      g.arc(0, 0, r, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+
+    function strataPath(x0, x1, yTop, yBot, amp, ph) {
+      return q => {
+        const steps = 18;
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const x = x0 + (x1 - x0) * t;
+          const y = yTop + Math.sin(t * Math.PI * 2 + ph) * amp + Math.sin(t * Math.PI * 4.3 + ph * 1.7) * amp * 0.35;
+          if (i === 0) q.moveTo(x, y);
+          else q.lineTo(x, y);
+        }
+        q.lineTo(x1, yBot);
+        q.lineTo(x0, yBot);
+        q.closePath();
+      };
+    }
+
     function drawLidPicture(b, gameId, k) {
       const px = 14 * k, py = 14 * k, pw = 272 * k, ph = 192 * k;
       const panelEdge = ctx.wob(px, py, px + pw, py + ph, 3.5 * k, 300 + ctx.sid(gameId));
@@ -387,67 +436,253 @@
         });
         b.c.restore(); b.g.restore();
       } else if (gameId === 'mancala') {
-        B.paper(b, panelEdge, '#ede2cb', 0.5);
-        // clay board
-        const bx = px + 14 * k, by = py + 32 * k, bw = pw - 28 * k, bh = ph - 64 * k;
-        B.paper(b, q => roundRectPath(q, bx, by, bw, bh, 26 * k), '#b8763c', 0.66);
-        // two stores
-        const sw = 28 * k, sh = bh - 24 * k;
-        B.paper(b, q => roundRectPath(q, bx + 12 * k, by + 12 * k, sw, sh, 14 * k), '#6e3f1c', 0.34);
-        B.paper(b, q => roundRectPath(q, bx + bw - 12 * k - sw, by + 12 * k, sw, sh, 14 * k), '#6e3f1c', 0.34);
-        // 2 rows x 6 pits + seeds
-        const seedCols = [PAP[4], PAP[6], PAP[5], PAP[0]];
-        const pitAreaX = bx + 12 * k + sw + 10 * k;
-        const pitAreaW = bw - 2 * (12 * k + sw + 10 * k);
-        const stepX = pitAreaW / 6;
-        const r = Math.min(13.5 * k, stepX * 0.42);
-        for (let row = 0; row < 2; row++) {
-          const cy = by + (row === 0 ? bh * 0.30 : bh * 0.70);
-          for (let col = 0; col < 6; col++) {
-            const cx = pitAreaX + (col + 0.5) * stepX;
-            B.paper(b, q => q.arc(cx, cy, r, 0, Math.PI * 2), '#6e3f1c', 0.34);
-            const sn = (row * 6 + col) % 3 === 0 ? 4 : 3;
-            for (let i = 0; i < sn; i++) {
-              const ang = (i / sn) * Math.PI * 2 + col * 0.7;
-              const sd = r * 0.42;
-              const sx = cx + Math.cos(ang) * sd, sy = cy + Math.sin(ang) * sd;
-              B.paper(b, q => q.arc(sx, sy, 3.6 * k, 0, Math.PI * 2), seedCols[(col + i + row) % seedCols.length], 0.72);
+        // Evening savanna: 4 sunset bands, low sun behind two plum hills, walking elephant, umbrella thorn, carved wood board
+        B.paper(b, panelEdge, '#d9607c', 0.30);
+        b.c.save(); b.g.save();
+        b.c.beginPath(); panelEdge(b.c); b.c.clip();
+        b.g.beginPath(); panelEdge(b.g); b.g.clip();
+
+        const x0 = px - 4 * k, x1 = px + pw + 4 * k, yBot = py + ph + 6 * k;
+        B.paper(b, strataPath(x0, x1, py + 26 * k, py + 110 * k, 3.2 * k, 1.0), '#e87862', 0.34);
+        B.paper(b, strataPath(x0, x1, py + 48 * k, py + 110 * k, 2.8 * k, 3.4), '#f09a50', 0.38);
+        B.paper(b, strataPath(x0, x1, py + 68 * k, py + 110 * k, 2.4 * k, 5.2), '#f7c45c', 0.42);
+
+        // low sun behind the far hill
+        B.paper(b, q => q.arc(px + 68 * k, py + 76 * k, 24 * k, 0, Math.PI * 2), '#ffe9a6', 0.48);
+
+        // far plum hill
+        B.paper(b, strataPath(x0, x1, py + 78 * k, py + 114 * k, 7.5 * k, 0.4), '#a8527f', 0.50);
+
+        // walking elephant silhouette facing right (matching mancala.js)
+        const ex = px + 118 * k, ey = py + 75 * k, es = 0.44 * k;
+        const eX = dx => ex - dx * es, eY = dy => ey + dy * es;
+        strokePaper(b, q => {
+          q.moveTo(eX(-25), eY(10)); q.lineTo(eX(-27), eY(34));
+          q.moveTo(eX(-5), eY(12));  q.lineTo(eX(-3), eY(34));
+          q.moveTo(eX(11), eY(12));  q.lineTo(eX(9), eY(34));
+          q.moveTo(eX(29), eY(10));  q.lineTo(eX(31), eY(34));
+        }, '#4a2456', 0.54, Math.max(1.2, 9 * es));
+        B.paper(b, q => q.ellipse(eX(0), eY(0), 36 * es, 22 * es, 0, 0, Math.PI * 2), '#4a2456', 0.54);
+        B.paper(b, q => q.ellipse(eX(-32), eY(-6), 18 * es, 18 * es, 0, 0, Math.PI * 2), '#4a2456', 0.54);
+        strokePaper(b, q => { q.moveTo(eX(-45), eY(-2)); q.quadraticCurveTo(eX(-54), eY(16), eX(-48), eY(30)); }, '#4a2456', 0.54, Math.max(1.1, 7 * es));
+        B.paper(b, q => q.ellipse(eX(-22), eY(-8), 11 * es, 15 * es, 0.2, 0, Math.PI * 2), '#5a2c66', 0.60);
+        strokePaper(b, q => { q.moveTo(eX(34), eY(-4)); q.quadraticCurveTo(eX(42), eY(4), eX(40), eY(14)); }, '#4a2456', 0.54, Math.max(0.9, 2.6 * es));
+
+        // near darker plum hill + ochre savanna ground
+        B.paper(b, strataPath(x0, x1, py + 90 * k, py + 118 * k, 5.5 * k, 2.3), '#743a70', 0.56);
+        B.paper(b, strataPath(x0, x1, py + 98 * k, yBot, 3.0 * k, 1.0), '#ecb94c', 0.60);
+
+        // subtle grass tufts on the ground
+        for (const [gx, gy, gs, col] of [
+          [34, 107, 4.5, '#d39a30'], [84, 105, 3.8, '#f6d57c'], [158, 106, 4.2, '#d39a30'],
+          [246, 109, 4.4, '#d39a30'], [26, 186, 5.0, '#d39a30'], [254, 185, 4.8, '#f6d57c']
+        ]) {
+          const tx = px + gx * k, ty = py + gy * k, s = gs * k;
+          strokePaper(b, q => {
+            q.moveTo(tx - s * 0.5, ty); q.lineTo(tx - s * 0.9, ty - s);
+            q.moveTo(tx, ty); q.lineTo(tx, ty - s * 1.35);
+            q.moveTo(tx + s * 0.5, ty); q.lineTo(tx + s * 0.95, ty - s);
+          }, col, 0.62, Math.max(0.9, 1.5 * k));
+        }
+
+        // umbrella thorn acacia on the right (kept clear of the top-right gold star)
+        const ax = px + 206 * k, ay = py + 98 * k, ts = 0.34 * k;
+        const tX = dx => ax + dx * ts, tY = dy => ay + (dy - 104) * ts;
+        strokePaper(b, q => {
+          q.moveTo(tX(8), tY(104)); q.quadraticCurveTo(tX(0), tY(50), tX(-34), tY(-26));
+          q.moveTo(tX(2), tY(50));  q.quadraticCurveTo(tX(24), tY(10), tX(66), tY(-30));
+          q.moveTo(tX(-14), tY(16)); q.lineTo(tX(-84), tY(-18));
+        }, '#4a2456', 0.64, Math.max(1.2, 10 * ts));
+        B.paper(b, q => q.ellipse(tX(-30), tY(-50), 108 * ts, 21 * ts, 0, 0, Math.PI * 2), '#2c7a5e', 0.70);
+        B.paper(b, q => q.ellipse(tX(58), tY(-46), 70 * ts, 16 * ts, 0, 0, Math.PI * 2), '#3c9270', 0.76);
+        B.paper(b, q => q.ellipse(tX(-92), tY(-30), 42 * ts, 11 * ts, 0, 0, Math.PI * 2), '#3c9270', 0.74);
+
+        // carved wood board with bevel and 5 bold deep clay pits + domed savanna beads
+        const bx = px + 18 * k, by = py + 111 * k, bw = pw - 36 * k, bh = 70 * k;
+        B.paper(b, q => roundRectPath(q, bx - 1.5 * k, by + 2.5 * k, bw + 3 * k, bh + 1.5 * k, 26 * k), '#84421a', 0.64);
+        B.paper(b, q => roundRectPath(q, bx, by, bw, bh, 24 * k), '#c26a2d', 0.78);
+
+        // faint wood grain lines
+        b.c.save();
+        b.c.strokeStyle = 'rgba(110,50,10,0.18)';
+        b.c.lineWidth = Math.max(0.8, 1.2 * k);
+        b.c.lineCap = 'round';
+        b.c.beginPath();
+        for (let i = 0; i < 4; i++) {
+          const gy = by + (14 + i * 14) * k;
+          b.c.moveTo(bx + 18 * k, gy);
+          b.c.bezierCurveTo(bx + bw * 0.35, gy - 2.5 * k, bx + bw * 0.65, gy + 2.5 * k, bx + bw - 18 * k, gy);
+        }
+        b.c.stroke();
+        b.c.restore();
+
+        const beadCols = ['#f6ecd2', '#f4c443', '#e5604d', '#1f8f84'];
+        const pitCounts = [4, 0, 3, 4, 3];
+        const pitR = 15.2 * k;
+        const beadR = 5.3 * k;
+        for (let i = 0; i < 5; i++) {
+          const cx = bx + (28 + i * 45) * k;
+          const cy = by + bh * 0.5;
+          B.paper(b, q => q.arc(cx, cy, pitR + 2.2 * k, 0, Math.PI * 2), '#d98a40', 0.82);
+          B.paper(b, q => q.arc(cx, cy, pitR, 0, Math.PI * 2), '#5b2a12', 0.36);
+          B.paper(b, q => q.arc(cx, cy + 1.2 * k, pitR * 0.76, 0, Math.PI * 2), '#431d0b', 0.28);
+          const n = pitCounts[i];
+          for (let j = 0; j < n; j++) {
+            const ang = (j / n) * Math.PI * 2 + i * 0.85 + 0.35;
+            const d = n === 3 ? pitR * 0.38 : pitR * 0.42;
+            const sx = cx + Math.cos(ang) * d;
+            const sy = cy + Math.sin(ang) * d + 0.8 * k;
+            domePaper(b, sx, sy, beadR, beadCols[(i * 2 + j) % beadCols.length], 0.74, 0.96);
+          }
+        }
+
+        b.c.restore(); b.g.restore();
+      } else if (gameId === 'othello') {
+        // Land and Sea: map sea sheet with ink waves, left green shore, sand neatline board, island & wave-crest tiles
+        const SEA = ctx.SEA, SEA_BOARD = '#bcd7d8', SAND = '#e3d8bf', INKSEA = '#15181f', FOAM = '#f4f1ea';
+        const GREEN = PAP[6], GREEN_D = PAP[7], BLUE = PAP[9], BLUE_D = PAP[10];
+        B.paper(b, panelEdge, SEA, 0.34);
+        b.c.save(); b.g.save();
+        b.c.beginPath(); panelEdge(b.c); b.c.clip();
+        b.g.beginPath(); panelEdge(b.g); b.g.clip();
+
+        // subtle curving green shore peeking in on the left margin
+        const shoreBand = (inset, col, rel) => B.paper(b, q => {
+          const steps = 16;
+          q.moveTo(px - 6 * k, py - 6 * k);
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const y = py - 4 * k + t * (ph + 8 * k);
+            const curve = 26 * k + Math.sin(t * Math.PI * 2.1 + 0.5) * 6 * k + Math.sin(t * Math.PI * 4.7) * 2.5 * k - inset * k;
+            q.lineTo(px + curve, y);
+          }
+          q.lineTo(px - 6 * k, py + ph + 6 * k);
+          q.closePath();
+        }, col, rel);
+        shoreBand(0, SAND, 0.48);
+        shoreBand(4.5, GREEN, 0.58);
+        shoreBand(14, GREEN_D, 0.68);
+
+        // open-water wave marks (matching othello.js)
+        const drawSeaWave = (wx, wy, sc) => {
+          const u = sc * k;
+          const xP = dx => wx + (dx - 60) * u, yP = dy => wy + (dy - 26) * u;
+          B.paper(b, q => {
+            q.moveTo(xP(8), yP(28)); q.quadraticCurveTo(xP(32), yP(8), xP(60), yP(24));
+            q.quadraticCurveTo(xP(86), yP(36), xP(112), yP(20));
+            q.quadraticCurveTo(xP(86), yP(44), xP(56), yP(32));
+            q.quadraticCurveTo(xP(30), yP(18), xP(8), yP(28)); q.closePath();
+          }, INKSEA, 0.45);
+          B.paper(b, q => q.arc(xP(58), yP(13), 4.2 * u, 0, Math.PI * 2), FOAM, 0.68);
+        };
+        drawSeaWave(px + 245 * k, py + 78 * k, 0.24);
+        drawSeaWave(px + 244 * k, py + 150 * k, 0.22);
+        drawSeaWave(px + 39 * k, py + 170 * k, 0.19);
+
+        // centered sand atlas neatline board with alternating ticks & pencil grid
+        const outer = 166 * k;
+        const bx = px + (pw - outer) / 2, by = py + (ph - outer) / 2;
+        const gSize = 148 * k;
+        const gx = px + (pw - gSize) / 2, gy = py + (ph - gSize) / 2;
+        const cell = gSize / 4;
+
+        B.paper(b, q => roundRectPath(q, bx, by, outer, outer, 3.5 * k), SAND, 0.50);
+        // alternating black neatline ticks
+        const tk = 4.5 * k, gap = 2 * k;
+        B.paper(b, q => {
+          for (let i = 0; i < 4; i++) {
+            const vx = gx + i * cell, vy = gy + i * cell;
+            if (i % 2 === 0) {
+              q.rect(vx, gy - gap - tk, cell, tk);
+              q.rect(gx + gSize + gap, vy, tk, cell);
+            } else {
+              q.rect(vx, gy + gSize + gap, cell, tk);
+              q.rect(gx - gap - tk, vy, tk, cell);
             }
           }
-        }
-        // a few seeds in stores
-        for (let i = 0; i < 3; i++) {
-          B.paper(b, q => q.arc(bx + 26 * k + (i % 2 - 0.5) * 7 * k, by + 48 * k + i * 14 * k, 3.8 * k, 0, Math.PI * 2), seedCols[i % 4], 0.72);
-          B.paper(b, q => q.arc(bx + bw - 26 * k + (i % 2 - 0.5) * 7 * k, by + 54 * k + i * 14 * k, 3.8 * k, 0, Math.PI * 2), seedCols[(i + 1) % 4], 0.72);
-        }
-      } else if (gameId === 'othello') {
-        B.paper(b, panelEdge, '#5e8f66', 0.5);
-        const gSize = 160 * k, gx = px + (pw - gSize) / 2, gy = py + (ph - gSize) / 2, cell = gSize / 4;
-        // cream stitched grid lines
-        const q = b.c;
-        q.save();
-        q.strokeStyle = 'rgba(250,246,236,0.75)';
-        q.lineWidth = Math.max(1, 1.8 * k);
-        q.setLineDash([6 * k, 4 * k]);
-        for (let i = 0; i <= 4; i++) {
-          q.beginPath(); q.moveTo(gx + i * cell, gy); q.lineTo(gx + i * cell, gy + gSize); q.stroke();
-          q.beginPath(); q.moveTo(gx, gy + i * cell); q.lineTo(gx + gSize, gy + i * cell); q.stroke();
-        }
-        q.restore();
-        const discs = [
-          { r: 1, c: 1, col: PAP[0] }, { r: 2, c: 2, col: PAP[0] }, { r: 0, c: 2, col: PAP[0] },
-          { r: 1, c: 2, col: PAP[10] }, { r: 2, c: 1, col: PAP[10] }, { r: 2, c: 3, col: PAP[10], half: true }
-        ];
-        const dr = cell * 0.36;
-        for (const d of discs) {
-          const cx = gx + (d.c + 0.5) * cell, cy = gy + (d.r + 0.5) * cell;
-          if (d.half) {
-            B.paper(b, q2 => q2.ellipse(cx + 2 * k, cy, dr * 0.34, dr, -0.15, 0, Math.PI * 2), PAP[0], 0.72);
-            B.paper(b, q2 => q2.ellipse(cx - 2 * k, cy, dr * 0.34, dr, -0.15, 0, Math.PI * 2), PAP[10], 0.78);
-          } else {
-            B.paper(b, q2 => q2.arc(cx, cy, dr, 0, Math.PI * 2), d.col, 0.74);
+        }, INKSEA, 0.52);
+        // lighter sea inside the board
+        B.paper(b, q => q.rect(gx - 1.5 * k, gy - 1.5 * k, gSize + 3 * k, gSize + 3 * k), SEA_BOARD, 0.40);
+        // pencil grid lines
+        for (const [q, st] of [[b.c, 'rgba(60,70,90,0.55)'], [b.g, B.grey(0.33)]]) {
+          q.save();
+          q.strokeStyle = st;
+          q.lineWidth = Math.max(0.9, 1.3 * k);
+          q.beginPath();
+          for (let i = 0; i <= 4; i++) {
+            const vx = gx + i * cell, vy = gy + i * cell;
+            q.moveTo(vx, gy); q.lineTo(vx, gy + gSize);
+            q.moveTo(gx, vy); q.lineTo(gx + gSize, vy);
           }
+          q.stroke();
+          q.restore();
         }
+
+        // sandy shoal legal-move dots (valid Land moves flanking Sea at (2,1))
+        for (const [dr, dc] of [[2, 0], [3, 1]]) {
+          const dx = gx + (dc + 0.5) * cell, dy = gy + (dr + 0.5) * cell;
+          B.paper(b, q => q.arc(dx, dy, 3.8 * k, 0, Math.PI * 2), SAND, 0.48);
+        }
+
+        // rounded-square two-faced Land (island) and Sea (wave crest) tiles
+        const ts = 30.5 * k, tr = 7.8 * k;
+        const drawTile = (r, c, side, sd, tilt) => {
+          const cx = gx + (c + 0.5) * cell, cy = gy + (r + 0.5) * cell;
+          for (const g of [b.c, b.g]) { g.save(); g.translate(cx, cy); g.rotate(tilt); }
+          if (side === 1) {
+            B.paper(b, q => roundRectPath(q, -ts / 2 + 1.1 * k, -ts / 2 + 2.0 * k, ts, ts, tr), BLUE_D, 0.45);
+            B.paper(b, q => roundRectPath(q, -ts / 2, -ts / 2, ts, ts, tr), SAND, 0.68);
+            // organic cut-paper green island + dark-green hill
+            const pts = [];
+            for (let i = 0; i < 9; i++) {
+              const a = (i / 9) * Math.PI * 2;
+              const rad = (7.6 + 3.4 * ctx.hs(i, sd, 2)) * k;
+              pts.push([Math.cos(a) * rad, Math.sin(a) * rad]);
+            }
+            const sm = (pp, col, rel) => B.paper(b, q => {
+              const n = pp.length;
+              const mid = i => [(pp[i % n][0] + pp[(i + 1) % n][0]) / 2, (pp[i % n][1] + pp[(i + 1) % n][1]) / 2];
+              const m0 = mid(0);
+              q.moveTo(m0[0], m0[1]);
+              for (let i = 1; i <= n; i++) {
+                const mi = mid(i);
+                q.quadraticCurveTo(pp[i % n][0], pp[i % n][1], mi[0], mi[1]);
+              }
+              q.closePath();
+            }, col, rel);
+            sm(pts, GREEN, 0.86);
+            const ox = (ctx.hs(sd, 1, 5) < 0.5 ? -1 : 1) * 2.4 * k;
+            const oy = (-1.4 + ctx.hs(sd, 2, 5) * 3.6) * k;
+            sm(pts.map(p => [p[0] * 0.36 + ox, p[1] * 0.32 + oy]), GREEN_D, 0.96);
+          } else {
+            B.paper(b, q => roundRectPath(q, -ts / 2 + 1.1 * k, -ts / 2 + 2.0 * k, ts, ts, tr), SAND, 0.45);
+            B.paper(b, q => roundRectPath(q, -ts / 2, -ts / 2, ts, ts, tr), BLUE, 0.70);
+            // crisp white paper wave crest + foam dot
+            const u = 0.22 * k;
+            const wX = dx => (dx - 60) * u, wY = dy => (dy - 26) * u;
+            B.paper(b, q => {
+              q.moveTo(wX(8), wY(28)); q.quadraticCurveTo(wX(32), wY(4), wX(60), wY(24));
+              q.quadraticCurveTo(wX(86), wY(38), wX(112), wY(18));
+              q.quadraticCurveTo(wX(86), wY(50), wX(56), wY(36));
+              q.quadraticCurveTo(wX(30), wY(20), wX(8), wY(28)); q.closePath();
+            }, FOAM, 0.90);
+            B.paper(b, q => q.arc(wX(58), wY(9), 5.2 * u, 0, Math.PI * 2), FOAM, 0.95);
+          }
+          for (const g of [b.c, b.g]) g.restore();
+        };
+
+        const tiles = [
+          [1, 1, 1, 1, -0.04],
+          [2, 2, 1, 2,  0.05],
+          [1, 3, 1, 3, -0.03],
+          [3, 2, 1, 4,  0.04],
+          [1, 2, 2, 1,  0.04],
+          [2, 1, 2, 2, -0.05],
+          [0, 2, 2, 3,  0.03]
+        ];
+        for (const [r, c, side, sd, tilt] of tiles) drawTile(r, c, side, sd, tilt);
+
+        b.c.restore(); b.g.restore();
       }
     }
 
