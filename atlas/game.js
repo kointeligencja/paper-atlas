@@ -2905,6 +2905,7 @@
   // ---------- player picker & name input ----------
   const inp = document.getElementById('pname');
   let picker = null, hold = null, needFirstPick = false;
+  let pickResume = null; // a world tap that opened the picker: finish it once a player is chosen
   const pickSprites = [];
   const pSpr = (tex, o) => { const s = spr(tex, Object.assign({ hud: true, pick: true, z: 0.14, zr: 0.03, order: 220, _pickerSpr: true }, o)); pickSprites.push(s); return s; };
   const playerCardTex = (p, cw, ch, active) => {
@@ -2979,6 +2980,8 @@
     updateHudToken();
     placeTag();
     setHint(worldHintStr());
+    const r = pickResume; pickResume = null;
+    if (r && currentPlayer() && mode === 'world') after(0.3, () => resumeTap(r));
   }
   let pendingFocus = false;
   function openPicker(kind, extra = {}) {
@@ -4156,12 +4159,18 @@
   let attractN = 0, firstInput = false;
   function stopAttract() {
     attract = false;
+    pickResume = null;
     timers = timers.filter(t => t.tag !== 'at' && t.tag !== 'rd' && t.tag !== 'rd2' && t.tag !== 'peek');
     if (RD) { RD.list.forEach(c => { if (!pending.includes(c) && csp[c.id] && !isBuiltId(prog, c.id)) { hideCountry(c); c.built = false; } }); }
     const willPick = store.players.length === 0 || store.players.length >= 2;
     goWorld(willPick ? 0 : 0.8);
     if (store.players.length === 0) openPicker('tokens');
     else if (store.players.length >= 2) openPicker('pick');
+  }
+  function resumeTap(r) {
+    if (mode !== 'world' || picker || passport || attract || !currentPlayer()) return;
+    if (r.btn) { press(r.btn); return; }
+    handleWorldTap(r.wx, r.wy);
   }
   function handleMapTap(p) {
     if (!RD || mode !== 'map') return;
@@ -4208,7 +4217,7 @@
     }
   }
   function handleWorldTap(wx, wy) {
-    if (!currentPlayer() && Q.get('done') !== 'all') { openPicker(store.players.length ? 'pick' : 'tokens'); return; }
+    if (!currentPlayer() && Q.get('done') !== 'all') { pickResume = { wx, wy }; openPicker(store.players.length ? 'pick' : 'tokens'); return; }
     if (twins.length > 0) {
       if (wx < BACKING_BOX[0] || wx > BACKING_BOX[2] || wy < BACKING_BOX[1] || wy > BACKING_BOX[3]) {
         sfx.back();
@@ -4264,7 +4273,15 @@
     if (passport) { handlePassportDown(p); return; }
     if (mode === 'mail') { amDown(e, p); return; } // air mail
     if (GM && mode === 'games') { GM.down(e, p); return; } // games
-    if (needFirstPick) { needFirstPick = false; openPicker('pick'); return; }
+    if (needFirstPick) {
+      // the first tap asks who is playing; remember what it was aimed at (a top button or a continent) and do it after
+      needFirstPick = false;
+      const fb = BTN_IDS.map(id => ({ id, s: btn[id] })).filter(q => q.s && q.s.alpha > 0.5);
+      const fh = pickHit(fb, p.hx, p.hy, 8, hudPx(), q => q.s);
+      pickResume = fh ? { btn: fh.id } : (playerBtn.alpha > 0.5 && hit(playerBtn, p.hx, p.hy, 8)) ? null : { wx: p.w[0], wy: p.w[1] };
+      openPicker('pick');
+      return;
+    }
     if (activePtrs.size >= 2 && ((mode === 'map' && playerLevel() === 'own' && RD && !drag) || (mode === 'world' && twins.length > 0 && !twinDrag))) {
       pan = null; mapTap = null; worldTap = null;
       const pts = [...activePtrs.values()].slice(0, 2);
@@ -4281,7 +4298,7 @@
     const topHit = pickHit(topHits, p.hx, p.hy, 8, hPx, q => q.s);
     if (topHit) {
       if (topHit.kind === 'token') { // batch 4b: during a round the token only wobbles
-        if (mode === 'world') { playerBtn.wob = undefined; playerBtn.lift = 0.15; tw(playerBtn, { lift: 0 }, 0.3); openPicker('pick'); } else startWobble(playerBtn);
+        if (mode === 'world') { playerBtn.wob = undefined; playerBtn.lift = 0.15; tw(playerBtn, { lift: 0 }, 0.3); pickResume = null; openPicker('pick'); } else startWobble(playerBtn);
         return;
       }
       const id = topHit.id, s = topHit.s;
@@ -4304,7 +4321,7 @@
       }
     }
     if (mode === 'world') {
-      if (!currentPlayer() && Q.get('done') !== 'all') { openPicker(store.players.length ? 'pick' : 'tokens'); return; }
+      if (!currentPlayer() && Q.get('done') !== 'all') { pickResume = { wx: p.w[0], wy: p.w[1] }; openPicker(store.players.length ? 'pick' : 'tokens'); return; }
       const twHit = hitTwinAt(p.w[0], p.w[1]);
       if (twHit) {
         twinDrag = { id: e.pointerId, tw: twHit, existing: true, moved: false, sx: e.clientX, sy: e.clientY, t: performance.now(), ox: twHit.s.x - p.w[0], oy: twHit.s.y - p.w[1] };
@@ -4726,7 +4743,7 @@
     idleTime = 0; zoomAt(e.clientX, e.clientY, gest.h0 * Math.pow(e.scale, -1.6) / cam.h); followCam(e);
   }, { passive: false });
   B.cv.addEventListener('click', () => { if (pendingFocus) { focusNameInput(); pendingFocus = false; } });
-  addEventListener('keydown', e => { if (isPhonePortrait()) return; if (inp && document.activeElement === inp) return; idleTime = 0; if (attract) { stopAttract(); return; } if (needFirstPick) { needFirstPick = false; openPicker('pick'); return; } if (picker) { if (e.key === 'Escape' && currentPlayer()) closePicker(true); return; } if (passport) { if (e.key === 'Escape') { e.preventDefault(); closePassport(true); } else if (e.key === 'ArrowRight') { e.preventDefault(); turnPassport(1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); turnPassport(-1); } return; } const k = e.key.toLowerCase(); if (k === 'r' || k === ' ') { if (mode === 'map' && RD && RD.piece) turn(RD.piece); else if (mode === 'world' && nextCont()) beginRound(nextCont()); } else if (k === 'enter' && mode === 'world' && nextCont()) beginRound(nextCont()); else if (k === 'h') press('hint'); else if (k === 'z' || k === 'u') press('undo'); else if (k === 'escape' || k === 'w') press('world'); else if (k === 's') press('sound'); else if (!e.ctrlKey && !e.metaKey && (k === '+' || k === '=' || k === '-') && (zoomable() || (GM && mode === 'games' && GM.zoomable()))) press(k === '-' ? 'zoomOut' : 'zoomIn'); });
+  addEventListener('keydown', e => { if (isPhonePortrait()) return; if (inp && document.activeElement === inp) return; idleTime = 0; if (attract) { stopAttract(); return; } if (needFirstPick) { needFirstPick = false; pickResume = null; openPicker('pick'); return; } if (picker) { if (e.key === 'Escape' && currentPlayer()) closePicker(true); return; } if (passport) { if (e.key === 'Escape') { e.preventDefault(); closePassport(true); } else if (e.key === 'ArrowRight') { e.preventDefault(); turnPassport(1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); turnPassport(-1); } return; } const k = e.key.toLowerCase(); if (k === 'r' || k === ' ') { if (mode === 'map' && RD && RD.piece) turn(RD.piece); else if (mode === 'world' && nextCont()) beginRound(nextCont()); } else if (k === 'enter' && mode === 'world' && nextCont()) beginRound(nextCont()); else if (k === 'h') press('hint'); else if (k === 'z' || k === 'u') press('undo'); else if (k === 'escape' || k === 'w') press('world'); else if (k === 's') press('sound'); else if (!e.ctrlKey && !e.metaKey && (k === '+' || k === '=' || k === '-') && (zoomable() || (GM && mode === 'games' && GM.zoomable()))) press(k === '-' ? 'zoomOut' : 'zoomIn'); });
   let resizeTmr = null, lastCam = { x: cam.x, y: cam.y, h: cam.h }, camStill = 0;
   function onResizeSettled() {
     rebakeFonts();
