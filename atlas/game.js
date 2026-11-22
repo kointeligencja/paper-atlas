@@ -638,6 +638,7 @@
     return list;
   })();
   for (const o of scraps) { o.s.own = true; kill(o.s); } // batch 4: replaced by each flag table's own offcuts (tableLayout)
+  desk.own = true; kill(desk); // the black desk sheet at y 1700 is unused now (flag tables bring their own mats) and peeked out below the frame on tall/portrait screens
   // accents: boats, clouds, sun
   const boatT = shapeTex(120, 110, b => { B.paper(b, x => { x.moveTo(12, 72); x.lineTo(108, 70); x.lineTo(90, 98); x.lineTo(28, 99); x.closePath(); }, PAP[2], 0.4); B.paper(b, x => { x.moveTo(60, 8); x.lineTo(63, 66); x.lineTo(98, 63); x.closePath(); }, PAP[0], 0.7); B.paper(b, x => { x.moveTo(54, 20); x.lineTo(55, 66); x.lineTo(24, 64); x.closePath(); }, PAP[5], 0.6); });
   const cloudT = shapeTex(220, 120, b => B.paper(b, x => { x.moveTo(30, 96); x.bezierCurveTo(-6, 92, 6, 52, 40, 58); x.bezierCurveTo(40, 22, 92, 10, 108, 44); x.bezierCurveTo(126, 22, 172, 30, 168, 62); x.bezierCurveTo(214, 56, 220, 100, 186, 98); x.closePath(); }, '#f4f1ea', 0.6));
@@ -4979,7 +4980,7 @@
     AM.ribQ = q;
     for (const e of AM.ribs) {
       const cx = ((e.r.x0 + e.r.dir * AM_RIB_SPEED * q / 12) % 2000 + 2000) % 2000;
-      e.s.x = cx; e.s.alpha = amRibbonVisible(e.r, cx, e.r.y) ? 1 : 0;
+      e.s.x = cx; e.s.alpha = !AM.box && amRibbonVisible(e.r, cx, e.r.y) ? 1 : 0; // none peek out around the letter box
     }
   }
 
@@ -6035,6 +6036,7 @@
     const fl = fileId && ML_BY[fileId], fileKey = fl ? (fl.journey || fl.id) : null;
     const box = { sprs: [], items: [], s, rect: [x0, y0, x0 + W0 * s, y0 + H0 * s], fileKey };
     AM.box = box;
+    if (AM.env) AM.env.alpha = 0; // the resting envelope would stick out beside the box
     const mk = (tex, o) => { const q = amSpr(tex, Object.assign({ hud: true, z: 0.14, zr: 0.03, order: 219 }, o)); q.own = true; box.sprs.push(q); return q; };
     const mt = shapeTex(Math.round(W0 * s * sc0), Math.round(H0 * s * sc0), b => B.paper(b, wob(6 * sc0, 6 * sc0, b.w - 6 * sc0, b.h - 6 * sc0, 9 * sc0, 4471), '#cdb995', 0.3), { noMip: true });
     box.mat = mk(mt, { order: 217, z: 0.13, zr: 0.02, x: X(W0 / 2), y: Y(H0 / 2), w: W0 * s, h: H0 * s, rot: -0.004 });
@@ -6060,6 +6062,7 @@
   function amBoxClose(restore) {
     const box = AM.box; if (!box) return;
     AM.box = null; for (const q of box.sprs) amKill(q);
+    if (AM.env) AM.env.alpha = 1;
     if (restore) setHint(amLetterHint());
   }
   function amBoxDown(p) { // an open envelope starts its letter; a completed journey's treasure re-opens its story; a tap outside the mat closes the box

@@ -909,11 +909,29 @@
         if (o.noAnim) deal(); else K.job(deal);
       });
 
+      tuckWorldFrame(box.rect, !!o.noAnim);
       if (!o.quiet) {
         ctx.setHint('Pick a game');
         ctx.sfx.turn();
       }
       return box;
+    }
+
+    // On a short wide screen the box is wider than the world map's black frame but not as tall, so the frame's bottom edge sticks
+    // out under the box like a dark strip. Zoom the world out a little so the whole frame sits behind the box.
+    function tuckWorldFrame(rect, now) {
+      if (!ctx.cam || !ctx.worldFrame) return;
+      const asp = ctx.asp(), W = 1000 * asp;
+      const wf = ctx.worldFrame(), k = 1000 / wf.h;
+      const FX0 = -72, FY0 = -68, FX1 = 2072, FY1 = 1042;
+      const L = W / 2 + (FX0 - wf.x) * k, R = W / 2 + (FX1 - wf.x) * k;
+      const T = 500 + (FY0 - wf.y) * k, B = 500 + (FY1 - wf.y) * k;
+      if (L < rect[0] || R > rect[2] || B <= rect[3] - 2) return; // not inside the box sideways, or nothing sticks out
+      const rh = rect[3] - rect[1] - 24, fh = FY1 - FY0;
+      const h = Math.max(wf.h, fh * 1000 / Math.max(60, rh));
+      const cx = (FX0 + FX1) / 2, cy = (FY0 + FY1) / 2;
+      const ty = cy - ((rect[1] + rect[3]) / 2 - 500) * h / 1000;
+      if (now) { ctx.killTw(ctx.cam); ctx.cam.x = cx; ctx.cam.y = ty; ctx.cam.h = h; } else ctx.camTo(cx, ty, h, 0.5);
     }
 
     function closeBox() {
@@ -1878,12 +1896,24 @@
         title.x = 34 + title.w / 2; title.y = 26 + title.h / 2;
         playerBtn.w = playerBtn.bw; playerBtn.h = playerBtn.bh;
         playerBtn.x = title.x + title.w / 2 + 14 + playerBtn.w / 2; playerBtn.y = title.y;
-        const leftEnd = hasP ? (playerBtn.x + playerBtn.w / 2 + 16) : (title.x + title.w / 2 + 16);
+        // the turn token is shown while a game is on even without a saved player (turnDisplay), so always keep its room free
+        const tokOn = hasP || screen === 'play' || screen === 'over';
+        const leftEnd = tokOn ? (playerBtn.x + playerBtn.w / 2 + 16) : (title.x + title.w / 2 + 16);
         const availBtnW = Math.max(120, W - 30 - leftEnd);
-        const rawW = rightIds.reduce((a, id) => a + btn[id].bw, 0) + 14 * Math.max(0, rightIds.length - 1);
-        const bs = Math.min(1, availBtnW / Math.max(1, rawW));
+        const rowW = ids => ids.reduce((a, id) => a + btn[id].bw, 0) + 14 * Math.max(0, ids.length - 1);
+        let barIds = rightIds;
+        // too narrow: the + and - go to the bottom-right corner, so the bar never grows over the title or the token
+        if (rightIds.some(id => id === 'zoomIn' || id === 'zoomOut') && availBtnW / Math.max(1, rowW(rightIds)) < 0.92) {
+          barIds = rightIds.filter(id => id !== 'zoomIn' && id !== 'zoomOut');
+          const zIn = btn.zoomIn, zOut = btn.zoomOut;
+          const zs = zIn.bw, zy = 1000 - 18 - zs / 2;
+          zIn.w = zIn.bw; zIn.h = zIn.bh; zIn.x = W - 24 - zIn.w / 2; zIn.y = zy;
+          zOut.w = zOut.bw; zOut.h = zOut.bh; zOut.x = zIn.x - zIn.w / 2 - 10 - zOut.w / 2; zOut.y = zy;
+          zIn.alpha = 1; zOut.alpha = 1; zIn.rail = true; zOut.rail = true;
+        }
+        const bs = Math.min(1, availBtnW / Math.max(1, rowW(barIds)));
         let x = W - 30;
-        for (const id of rightIds) {
+        for (const id of barIds) {
           const s = btn[id];
           s.alpha = 1; s.w = s.bw * bs; s.h = s.bh * bs;
           s.x = x - s.w / 2; s.y = 30 + s.h / 2;

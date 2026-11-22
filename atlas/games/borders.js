@@ -653,6 +653,8 @@
       if (mb) {
         const asp = ctx.asp();
         const mw = mb[2] - mb[0], mh = mb[3] - mb[1];
+        // never look past the map's own sheet (tall screens would otherwise show the black frame above and below)
+        if (baseCam.h > mh) baseCam.h = mh;
         const hw = baseCam.h * asp * 0.5;
         const hh = baseCam.h * 0.5;
         if (hw * 2 <= mw) {
@@ -1752,15 +1754,12 @@
       syncMarks(K.isFast() ? 'now' : 'stage');
       updateScore(false);
 
-      const immediate = !!(meta && meta.immediate) || K.isFast();
-      if (immediate) {
-        ctx.killTw(ctx.cam);
-        ctx.cam.x = baseCam.x;
-        ctx.cam.y = baseCam.y;
-        ctx.cam.h = baseCam.h;
-      } else {
-        ctx.camTo(baseCam.x, baseCam.y, baseCam.h, 0.9);
-      }
+      // Cut straight to the board view: the paper sheet is only baked over this view, so a glide from the world frame
+      // (or from the last board) would show the painted world map and the black frame edge on the way.
+      ctx.killTw(ctx.cam);
+      ctx.cam.x = baseCam.x;
+      ctx.cam.y = baseCam.y;
+      ctx.cam.h = baseCam.h;
 
       updateTurnDisplay(false);
       const myGen = gen;
