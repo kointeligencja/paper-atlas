@@ -173,6 +173,8 @@
   const LVL_Q = Q.get('level');
   const cleanName = s => String(s || '').replace(/[\r\n]/g, '').trim().slice(0, 12);
   const cleanLevel = l => l === 'help' ? 'help' : 'own';
+  const TURN_TAPS_TO_LEARN = 3;
+  const TURN_HINT = 'Tap a piece to turn it';
   const cleanRec = raw => {
     const out = {};
     if (!raw || typeof raw !== 'object') return out;
@@ -214,7 +216,7 @@
     return { prog: { built, world: (Number(raw.all) || 0) >= 1 }, changed: true };
   }
   const nextId = () => { let n = 1; while (store.players.some(p => p.id === 'p' + n)) n++; return 'p' + n; };
-  const mkPlayer = (token, name, progObj, level, recObj, shownArr) => ({ id: nextId(), token, name: cleanName(name), level: cleanLevel(level), prog: migrateProg(progObj).prog, rec: cleanRec(recObj), passShown: cleanPassShown(shownArr), created: Date.now() });
+  const mkPlayer = (token, name, progObj, level, recObj, shownArr) => ({ id: nextId(), token, name: cleanName(name), level: cleanLevel(level), prog: migrateProg(progObj).prog, rec: cleanRec(recObj), passShown: cleanPassShown(shownArr), turnTaps: 0, created: Date.now() });
   const save = () => {
     if (!allowSave) return;
     try { localStorage.setItem(V2_KEY, JSON.stringify(store)); storageOk = true; } catch (e) { storageOk = false; }
@@ -231,7 +233,7 @@
             if (!p || !TOKENS.includes(p.token) || seenTok.has(p.token) || store.players.length >= 6) continue;
             seenTok.add(p.token);
             const mp = migrateProg(p.prog); if (mp.changed || !p.level) migrated = true;
-            store.players.push({ id: String(p.id || nextId()), token: p.token, name: cleanName(p.name), level: cleanLevel(p.level), prog: mp.prog, rec: cleanRec(p.rec), passShown: cleanPassShown(p.passShown), created: Number(p.created) || Date.now(), mail: cleanMail(p.mail), games: window.PAPER_GAMES && window.PAPER_GAMES.cleanSave ? window.PAPER_GAMES.cleanSave(p.games) : p.games }); // air mail: mail kept // games
+            store.players.push({ id: String(p.id || nextId()), token: p.token, name: cleanName(p.name), level: cleanLevel(p.level), prog: mp.prog, rec: cleanRec(p.rec), passShown: cleanPassShown(p.passShown), turnTaps: clamp(Math.floor(Number(p.turnTaps) || 0), 0, TURN_TAPS_TO_LEARN), created: Number(p.created) || Date.now(), mail: cleanMail(p.mail), games: window.PAPER_GAMES && window.PAPER_GAMES.cleanSave ? window.PAPER_GAMES.cleanSave(p.games) : p.games }); // air mail: mail kept // games
           }
           store.current = store.players.some(p => p.id === d.current) ? d.current : null;
           if (migrated) save();
@@ -2170,6 +2172,7 @@
     for (const id in csp) syncStar(csp[id]);
     for (const n of activeTags) layoutTagSprite(n);
     syncPieceFlags();
+    syncTurnCue();
   }
   function waitSlot(s) {
     const pxHud = innerHeight / 1000;
@@ -2591,6 +2594,7 @@
   }
   function nextPiece() {
     if (!RD) return;
+    clearTurnCue();
     settleCard();
     if (!RD.queue.length) {
       if (RD.ct.id === 'all' && !RD.aq) { RD.aq = true; RD.queue.push(AQ); }
@@ -2648,7 +2652,7 @@
       s.pole = pole; s.flag = fl; RD.tmp.push(pole, fl);
       syncPieceFlags();
     }
-    if (!attract) setHint(RD.wind ? ('Put ' + inSent(c) + ' back') : (c === AQ ? 'Last piece: Antarctica' : rot ? 'Turn ' + inSent(c) + ' and put it in place' : 'Put ' + inSent(c) + ' in its place'));
+    startPieceHint(s);
     if (RD.wind) speakCountry(c, false);
     if (RD.auto) after(1.5, () => {
       if (!RD || RD.piece !== s) return;
@@ -2695,9 +2699,74 @@
       s.pole = pole; s.flag = fl; RD.tmp.push(pole, fl);
       syncPieceFlags();
     }
-    if (!attract) setHint(RD.wind ? ('Put ' + inSent(c) + ' back') : (c === AQ ? 'Last piece: Antarctica' : rot ? 'Turn ' + inSent(c) + ' and put it in place' : 'Put ' + inSent(c) + ' in its place'));
+    startPieceHint(s);
     if (RD.wind) speakCountry(c, false);
     if (RD.auto) after(1.5, () => { if (!RD || RD.piece !== s) return; tw(s, { lift: 0.3 }, 0.3); tw(s, { x: tp.x, y: tp.y, rot: 0 }, 1.7, { delay: 0.3, done: () => { if (RD && RD.piece === s) landPiece(s); } }); }, 'rd');
+  }
+  function canTeachTurn(s) {
+    return !attract && !RD.auto && !RD.wind && RD.ct.rotate && s.c !== AQ &&
+      !s.turnUsed && ((currentPlayer()?.turnTaps || 0) < TURN_TAPS_TO_LEARN);
+  }
+  function setPieceHint(s, needsTurn) {
+    const name = inSent(s.c);
+    setHint(RD.wind ? 'Put ' + name + ' back' : s.c === AQ ? 'Last piece: Antarctica' :
+      needsTurn ? 'Turn ' + name + ' and put it in place' : 'Put ' + name + ' in its place');
+  }
+  function startPieceHint(s) {
+    if (attract) return;
+    const firstRound = RD.r === 0 && (RD.replay || !RD.roundHadBuilt || RD.ct.id === 'all');
+    if (firstRound && !RD.turnIntro && s.rot && canTeachTurn(s)) {
+      RD.turnIntro = true;
+      showTurnHint();
+    } else setPieceHint(s, !!s.rot);
+  }
+  function showTurnHint() {
+    setHint(TURN_HINT);
+    if (RD.turnCue) return;
+    const tx = shapeTex(96, 96, b => B.paper(b, p => {
+      p.moveTo(19, 62);
+      p.bezierCurveTo(5, 31, 32, 9, 54, 15);
+      p.bezierCurveTo(67, 17, 77, 27, 80, 38);
+      p.lineTo(91, 33);
+      p.lineTo(82, 62);
+      p.lineTo(57, 45);
+      p.lineTo(68, 42);
+      p.bezierCurveTo(60, 17, 22, 25, 27, 57);
+      p.closePath();
+    }, '#775738', 0.32));
+    const cue = spr(tx, { own: true, z: 0.25, order: 103, lift: 0.18, rot: 0.08 });
+    RD.turnCue = cue;
+    RD.tmp.push(cue);
+    tw(cue, { lift: 0, rot: 0 }, 0.25, { cut: true });
+    syncTurnCue();
+  }
+  function syncTurnCue() {
+    const cue = RD?.turnCue, s = RD?.piece;
+    if (!cue || !s) return;
+    cue.alpha = hintTxt === TURN_HINT && drag?.s !== s && !isPhonePortrait() ? 1 : 0;
+    if (!cue.alpha) return;
+    const [hx, hy] = w2h(s.x, s.y);
+    const size = clamp(32000 / innerHeight, 42, 76);
+    const halfWidth = (Math.abs(Math.cos(s.rot)) * s.w + Math.abs(Math.sin(s.rot)) * s.h) * s.sc * 500 / cam.h;
+    const reach = halfWidth + size * 0.68;
+    const edge = size * 0.6;
+    const x = hx - reach >= edge ? hx - reach : hx + reach;
+    const hintBottom = hintS.y + hintS.h * 0.5;
+    [cue.x, cue.y] = h2w(clamp(x, edge, asp * 1000 - edge), clamp(hy, hintBottom + edge, 1000 - edge));
+    cue.w = cue.h = size * cam.h / 1000;
+  }
+  function clearTurnCue() {
+    const cue = RD.turnCue;
+    if (!cue) return;
+    killTw(cue);
+    kill(cue);
+    RD.tmp = RD.tmp.filter(s => s !== cue);
+    RD.turnCue = null;
+  }
+  function remindTurn(s) {
+    if (RD.miss < 2 || s.turnReminder || !canTeachTurn(s)) return;
+    s.turnReminder = true;
+    showTurnHint();
   }
   function applyHintStep(step) {
     if (!RD || mode !== 'map' || !RD.piece) return;
@@ -2744,6 +2813,7 @@
     }
   }
   function landPiece(s) {
+    clearTurnCue();
     const c = s.c; RD.piece = null; c.built = true; sfx.snap(); speakCountry(c, !!CAP[c.id]);
     if (!RD.replay && !attract && c !== AQ && currentPlayer()) {
       const pl = currentPlayer();
@@ -4463,8 +4533,18 @@
     if (drag.piece) { const snap = isPieceSnap(s); if (snap !== drag.inSnap) { drag.inSnap = snap; killTw(s, ['lift']); s.lift = snap ? 0.14 : 0.32; } }
     else { const snap = !!isPartSnap(s); if (snap !== drag.inSnap) { drag.inSnap = snap; killTw(s, ['lift']); s.lift = snap ? 0.12 : 0.3; } }
   }
-  function turn(s) {
+  function turn(s, tapped = false) {
     const nr = (s._rotTo !== undefined ? s._rotTo : s.rot) + Math.PI / 2; s._rotTo = nr;
+    if (mode === 'map' && RD?.piece === s && RD.ct.rotate && s.c !== AQ && !RD.auto && !attract) {
+      const p = currentPlayer();
+      if (tapped && !RD.wind && p && (p.turnTaps || 0) < TURN_TAPS_TO_LEARN) {
+        p.turnTaps = (p.turnTaps || 0) + 1;
+        save();
+      }
+      s.turnUsed = true;
+      clearTurnCue();
+      if (hintTxt === TURN_HINT || hintTxt === 'Turn it first') setPieceHint(s, Math.round(nr / (Math.PI / 2)) % 4 !== 0);
+    }
     if (s.waiting) {
       tw(s, { rot: nr }, 0.22, { cut: true, done: () => { s._piv = null; s._rotTo = undefined; } });
       sfx.turn();
@@ -4557,13 +4637,20 @@
     if (d.piece) {
       if (d.wasReturning && !d.scaled) { s.waiting = true; syncWaitingPiece(s); }
       const rotOk = Math.abs(Math.sin(s.rot / 2)) < 0.05 || Math.abs(((s.rot % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) < 0.05;
-      if (!cancelled && moved < 7 && performance.now() - d.t < 450 && (RD.ct.rotate || !rotOk)) { turn(s); tw(s, { lift: 0.12 }, 0.18, { cut: true }); return; }
+      if (!cancelled && moved < 7 && performance.now() - d.t < 450 && (RD.ct.rotate || !rotOk)) { turn(s, true); tw(s, { lift: 0.12 }, 0.18, { cut: true }); return; }
       if (s.waiting) { tw(s, { lift: 0.12 }, 0.18, { cut: true }); return; }
       const dist = Math.hypot(s.x - s.tp.x, s.y - s.tp.y), tol = pieceTolW(s);
       if (!cancelled && dist < tol && rotOk) return landPiece(s);
       if (!cancelled) {
         RD.miss++; sfx.back();
-        if (dist < tol) { setHint('Turn it first. Tap the piece'); tw(s, { lift: 0.12 }, 0.18, { cut: true }); s.wig = T; return; }
+        if (dist < tol) {
+          if (RD.wind) setHint('Turn it first. Tap the piece');
+          else if (hintTxt !== TURN_HINT) {
+            setHint('Turn it first');
+            remindTurn(s);
+          }
+          tw(s, { lift: 0.12 }, 0.18, { cut: true }); s.wig = T; return;
+        }
       }
       s._piv = null; s._rotTo = undefined;
       if (playerLevel() === 'own') {
@@ -4581,6 +4668,7 @@
           if (RD.miss >= 2) showGhost();
         }
       }
+      if (!cancelled && !rotOk) remindTurn(s);
       return;
     }
     // flag part
